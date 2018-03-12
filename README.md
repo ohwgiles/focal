@@ -20,3 +20,14 @@ mkdir focal-build && cd focal-build && cmake ../focal
 # Build and run focal
 make && ./focal
 ```
+
+### Running focal
+
+So far there is no user interface for connecting to an account. You need to create the file `~/.config/focal.conf` and insert a section like this:
+
+```
+[main]
+url=http://path/to/caldav/server/endpoint
+user=caldav_user
+pass=caldav_pass
+```
