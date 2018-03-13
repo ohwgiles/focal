@@ -58,7 +58,7 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 
 	for (icalproperty* attendees = icalcomponent_get_first_property(vev, ICAL_ATTENDEE_PROPERTY); attendees; attendees = icalcomponent_get_next_property(vev, ICAL_ATTENDEE_PROPERTY)) {
 		const char* cal_addr = icalproperty_get_attendee(attendees);
-		if (strcasecmp(cal_addr, "mailto:") != 0)
+		if (strncasecmp(cal_addr, "mailto:", 7) != 0)
 			continue;
 		cal_addr = &cal_addr[7];
 		// check each known Calendar for matching address
