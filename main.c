@@ -198,8 +198,14 @@ int main(int argc, char** argv)
 	g_signal_connect(fm.mainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
 	gtk_window_set_default_size(GTK_WINDOW(fm.mainWindow), 780, 630);
-	gtk_window_set_title(GTK_WINDOW(fm.mainWindow), "focal");
 
+	// create window title
+	int week = get_current_week(FOCAL_WEEK_VIEW(fm.weekView));
+	int length = snprintf(NULL, 0, "%d", week);
+	char week_num[5 + length + 1];
+	snprintf(week_num, 5 + length + 1, "Week %d", week);
+
+	gtk_window_set_title(GTK_WINDOW(fm.mainWindow), week_num);
 	gtk_widget_show_all(fm.mainWindow);
 
 	// handle invitations on command line

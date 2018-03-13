@@ -26,5 +26,6 @@ GtkWidget* week_view_new(void);
 void week_view_add_event(WeekView* cal, icalcomponent* vevent);
 void week_view_remove_event(WeekView* cal, icalcomponent* vevent);
 void week_view_add_calendar(WeekView* widget, Calendar* cal);
+int get_current_week(WeekView* wv);
 
 #endif // WEEK_VIEW_H
