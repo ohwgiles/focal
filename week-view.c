@@ -150,8 +150,7 @@ static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data
 
 static gboolean on_scroll(GtkWidget* widget, GdkEventScroll* ev, gpointer user_data)
 {
-	FOCAL_WEEK_VIEW(widget)
-		->scroll_top += 15 * ev->delta_y;
+	FOCAL_WEEK_VIEW(widget)->scroll_top += 15 * ev->delta_y;
 	gtk_widget_queue_draw(widget);
 	return FALSE;
 }

@@ -206,6 +206,7 @@ int main(int argc, char** argv)
 	snprintf(week_num, 5 + length + 1, "Week %d", week);
 
 	gtk_window_set_title(GTK_WINDOW(fm.mainWindow), week_num);
+
 	gtk_widget_show_all(fm.mainWindow);
 
 	// handle invitations on command line
