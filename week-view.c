@@ -326,3 +326,8 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 	calendar_each_event(cal, add_event_from_calendar, wv);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
+
+int week_view_get_current_week(WeekView* wv)
+{
+	return wv->current_week;
+}
