@@ -17,24 +17,20 @@
 
 #include "caldav-client.h"
 
-typedef struct {
-	char* nsDav;
-	char* nsCal;
-	char* tagCalendarData;
-	char* tagDisplayName;
-	char* tagCTag;
-} CaldavXml;
-
 struct _CaldavClient {
 	char* url;
 	char* username;
 	char* password;
 	gboolean verify_cert;
-	CaldavXml xml;
 };
 
 typedef struct {
-	CaldavXml* props;
+	char* nsDav;
+	char* nsCalSrv;
+	char* nsCalDav;
+	char* tagCalendarData;
+	char* tagDisplayName;
+	char* tagCTag;
 	GString chars;
 	GSList* event_list;
 } XmlParseCtx;
@@ -47,10 +43,10 @@ static void xmlparse_characters(void* ctx, const xmlChar* ch, int len)
 
 static void xmlparse_init_start(void* ctx, const xmlChar* fullname, const xmlChar** atts)
 {
-	CaldavXml* xpc = ((XmlParseCtx*) ctx)->props;
+	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
 
 	// return if we already found the namespace names
-	if (xpc->nsDav && xpc->nsCal)
+	if (xpc->nsDav)
 		return;
 
 	if (!strstr(fullname, ":multistatus"))
@@ -64,9 +60,11 @@ static void xmlparse_init_start(void* ctx, const xmlChar* fullname, const xmlCha
 			if (xpc->nsDav == NULL && strcmp(v, "DAV:") == 0) {
 				xpc->nsDav = strdup(*k + 6);
 				asprintf(&xpc->tagDisplayName, "%s:displayname", *k + 6);
-			} else if (xpc->nsCal == NULL && strcmp(v, "http://calendarserver.org/ns/") == 0) {
-				xpc->nsCal = strdup(*k + 6);
+			} else if (xpc->nsCalSrv == NULL && strcmp(v, "http://calendarserver.org/ns/") == 0) {
+				xpc->nsCalSrv = strdup(*k + 6);
 				asprintf(&xpc->tagCTag, "%s:getctag", *k + 6);
+			} else if (xpc->nsCalDav == NULL && strcmp(v, "urn:ietf:params:xml:ns:caldav") == 0) {
+				xpc->nsCalDav = strdup(*k + 6);
 				asprintf(&xpc->tagCalendarData, "%s:calendar-data", *k + 6);
 			}
 		}
@@ -82,11 +80,9 @@ static void xmlparse_init_end(void* ctx, const xmlChar* name)
 static void xmlparse_sync_end(void* ctx, const xmlChar* name)
 {
 	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
-	CaldavXml* props = xpc->props;
-	if (props->tagCalendarData && strcmp(name, props->tagCalendarData) == 0) {
+	if (xpc->tagCalendarData && strcmp(name, xpc->tagCalendarData) == 0) {
 		icalcomponent* comp = icalparser_parse_string(xpc->chars.str);
-		icalcomponent* vevent =
-			icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
+		icalcomponent* vevent = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
 		if (vevent) {
 			// printf("got event %s\n", icalcomponent_get_summary(vevent));
 			xpc->event_list = g_slist_append(xpc->event_list, vevent);
@@ -145,7 +141,7 @@ gboolean caldav_client_init(CaldavClient* cc)
 	if (curl_easy_perform(curl) != CURLE_OK)
 		return curl_easy_cleanup(curl), FALSE;
 
-	XmlParseCtx ctx = {.props = &cc->xml};
+	XmlParseCtx ctx = {0};
 	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
 								.startElement = xmlparse_init_start,
 								.endElement = xmlparse_init_end};
@@ -181,8 +177,7 @@ gboolean caldav_client_put(CaldavClient* cc, icalcomponent* event, const char* u
 	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
 
-	char* caldata =
-		icalcomponent_as_ical_string(icalcomponent_get_parent(event));
+	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
 
 	CURLcode res = curl_easy_perform(curl);
@@ -253,11 +248,10 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	if (curl_easy_perform(curl) != CURLE_OK)
 		return curl_easy_cleanup(curl), NULL;
 
-	XmlParseCtx ctx = {.props = &cc->xml,
-					   .event_list = g_slist_alloc()};
+	XmlParseCtx ctx = {.event_list = g_slist_alloc()};
 
 	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
-								.startElement = NULL,
+								.startElement = xmlparse_init_start,
 								.endElement = xmlparse_sync_end};
 	xmlSAXUserParseMemory(&my_handler, &ctx, str->str, str->len);
 
