@@ -254,23 +254,9 @@ static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
 
 	struct icaldurationtype duration = icalcomponent_get_duration(vevent);
 
-	// first add the event itself
-	if (dtstart.year == cw->current_year) {
-		icaltime_span span = icaltime_span_new(dtstart, icaltime_add(dtstart, duration), 0);
-		if (icaltime_span_overlaps(&span, &cw->current_view)) {
-			int dow = icaltime_day_of_week(dtstart) - 1;
-			EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-			w->ev = vevent;
-			w->minutes_from = dtstart.hour * 60 + dtstart.minute;
-			w->minutes_to = dtend.hour * 60 + dtend.minute;
-			w->next = cw->events_week[dow];
-			cw->events_week[dow] = w;
-		}
-	}
-
-	// check for recurring events
 	icalproperty* rrule = icalcomponent_get_first_property(vevent, ICAL_RRULE_PROPERTY);
 	if (rrule) {
+		// recurring event
 		struct icalrecurrencetype recur = icalproperty_get_rrule(rrule);
 		icalrecur_iterator* ritr = icalrecur_iterator_new(recur, dtstart);
 		icaltimetype next;
@@ -290,6 +276,20 @@ static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
 				w->ev = vevent;
 				w->minutes_from = next.hour * 60 + next.minute;
 				w->minutes_to = (next.hour + duration.hours) * 60 + next.minute + duration.minutes;
+				w->next = cw->events_week[dow];
+				cw->events_week[dow] = w;
+			}
+		}
+	} else {
+		// non-recurring event
+		if (dtstart.year == cw->current_year) {
+			icaltime_span span = icaltime_span_new(dtstart, icaltime_add(dtstart, duration), 0);
+			if (icaltime_span_overlaps(&span, &cw->current_view)) {
+				int dow = icaltime_day_of_week(dtstart) - 1;
+				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
+				w->ev = vevent;
+				w->minutes_from = dtstart.hour * 60 + dtstart.minute;
+				w->minutes_to = dtend.hour * 60 + dtend.minute;
 				w->next = cw->events_week[dow];
 				cw->events_week[dow] = w;
 			}
