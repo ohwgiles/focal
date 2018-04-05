@@ -17,11 +17,9 @@
 #include "calendar.h"
 
 #define REMOTE_CALENDAR_TYPE (remote_calendar_get_type())
-G_DECLARE_FINAL_TYPE(RemoteCalendar, remote_calendar, FOCAL, REMOTE_CALENDAR,
-					 Calendar)
+G_DECLARE_FINAL_TYPE(RemoteCalendar, remote_calendar, FOCAL, REMOTE_CALENDAR, Calendar)
 
-Calendar* remote_calendar_new(const char* url, const char* username,
-							  const char* password);
+Calendar* remote_calendar_new(const char* url, const char* username, const char* password);
 
 void remote_calendar_sync(RemoteCalendar* cal);
 

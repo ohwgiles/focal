@@ -37,7 +37,7 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
 	for (GSList* p = rc->events; p; p = p->next) {
-		callback(user, p->data);
+		callback(user, (Calendar*) rc, p->data);
 	}
 }
 

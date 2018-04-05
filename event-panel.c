@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "event-panel.h"
+#include "calendar.h"
 
 typedef struct {
 	GtkWidget* layout;
@@ -66,7 +67,8 @@ struct _EventPanel {
 	GtkTextBuffer* description;
 	AttendeeLayout attendees;
 
-	icalcomponent* event;
+	Calendar* selected_calendar;
+	icalcomponent* selected_event;
 };
 G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_VBOX)
 
@@ -79,7 +81,7 @@ static guint event_panel_signals[LAST_SIGNAL] = {0};
 
 static void event_panel_class_init(EventPanelClass* klass)
 {
-	event_panel_signals[SIGNAL_EVENT_DELETE] = g_signal_new("cal-event-delete", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	event_panel_signals[SIGNAL_EVENT_DELETE] = g_signal_new("cal-event-delete", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void event_panel_init(EventPanel* self)
@@ -104,7 +106,7 @@ static void first_show(GtkWidget* widget)
 static void delete_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->event);
+	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_calendar, ew->selected_event);
 }
 
 static inline GtkWidget* field_label_new(const char* label)
@@ -184,10 +186,10 @@ GtkWidget* event_panel_new()
 	return (GtkWidget*) e;
 }
 
-void event_panel_set_event(EventPanel* ew, icalcomponent* ev)
+void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 {
 	attendee_layout_clear(&ew->attendees);
-	if (ev) {
+	if (cal && ev) {
 		icaltimetype dt;
 		char time_buf[6];
 		gtk_label_set_label(GTK_LABEL(ew->event_label), icalcomponent_get_summary(ev));
@@ -212,10 +214,13 @@ void event_panel_set_event(EventPanel* ew, icalcomponent* ev)
 			attendee_layout_relayout(ew->attendees.layout, &alloc, &ew->attendees);
 		}
 		gtk_widget_show(ew->bar);
+		ew->selected_calendar = cal;
+		ew->selected_event = ev;
 	} else {
 		gtk_widget_hide(ew->details);
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ew->details_button), FALSE);
 		gtk_widget_hide(ew->bar);
+		ew->selected_calendar = NULL;
+		ew->selected_event = NULL;
 	}
-	ew->event = ev;
 }

@@ -20,7 +20,7 @@
 #define TYPE_CALENDAR (calendar_get_type())
 G_DECLARE_DERIVABLE_TYPE(Calendar, calendar, FOCAL, CALENDAR, GObject)
 
-typedef void (*CalendarEachEventCallback)(void* user, icalcomponent* vevent);
+typedef void (*CalendarEachEventCallback)(void* user, Calendar*, icalcomponent*);
 
 struct _CalendarClass {
 	GObjectClass parent;

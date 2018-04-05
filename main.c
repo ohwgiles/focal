@@ -73,11 +73,11 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 		}
 	}
 
-	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), vev);
-
 	// TODO allow selecting a calendar in the dialog
 	if (!cal)
 		cal = FOCAL_CALENDAR(focal->calendars->data);
+
+	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), cal, vev);
 
 	GtkWidget* dialog;
 	dialog = gtk_message_dialog_new(GTK_WINDOW(focal->mainWindow),
@@ -110,23 +110,15 @@ static void rpc_handle_cmd(const char* cmd, void* data)
 	}
 }
 
-static void cal_add_vevent(WeekView* widget, icalcomponent* ev, FocalMain* fm)
+static void cal_event_selected(WeekView* widget, Calendar* cal, icalcomponent* e, EventPanel* ew)
 {
-	// TODO pass calendar association with callback
-	Calendar* cal = FOCAL_CALENDAR(fm->calendars->data);
-	calendar_add_event(cal, ev);
+	event_panel_set_event(ew, cal, e);
 }
 
-static void cal_event_selected(WeekView* widget, icalcomponent* e, EventPanel* ew)
-{
-	event_panel_set_event(ew, e);
-}
-
-static void event_delete(EventPanel* event_panel, icalcomponent* ev, FocalMain* focal)
+static void event_delete(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
 {
 	// TODO "are you sure?" popup
-	// TODO pass calendar association with callback
-	calendar_delete_event(FOCAL_CALENDAR(focal->calendars->data), ev);
+	calendar_delete_event(FOCAL_CALENDAR(cal), ev);
 	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
@@ -192,7 +184,6 @@ int main(int argc, char** argv)
 
 	gtk_window_set_type_hint((GtkWindow*) fm.mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
-	g_signal_connect(fm.weekView, "add-vevent", (GCallback) &cal_add_vevent, &fm);
 	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, event_panel);
 	g_signal_connect(event_panel, "cal-event-delete", (GCallback) &event_delete, &fm);
 

@@ -20,6 +20,8 @@
 
 struct _EventWidget {
 	icalcomponent* ev;
+	// associated calendar
+	Calendar* cal;
 	// cached time values for faster drawing
 	int minutes_from, minutes_to;
 	// list pointer
@@ -43,7 +45,6 @@ struct _WeekView {
 };
 
 enum {
-	SIGNAL_ADD_VEVENT,
 	SIGNAL_EVENT_SELECTED,
 	LAST_SIGNAL
 };
@@ -173,17 +174,16 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			}
 		}
 		if (tmp)
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->ev);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, tmp->ev);
 		else
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL, NULL);
 	}
 	return TRUE;
 }
 
 static void week_view_class_init(WeekViewClass* klass)
 {
-	week_view_signals[SIGNAL_ADD_VEVENT] = g_signal_new("add-vevent", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
-	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
@@ -241,7 +241,7 @@ GtkWidget* week_view_new()
 	return (GtkWidget*) cw;
 }
 
-static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
+static void add_event_from_calendar(gpointer user_data, Calendar* cal, icalcomponent* vevent)
 {
 	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
 	icaltimetype dtstart = icalcomponent_get_dtstart(vevent);
@@ -273,6 +273,7 @@ static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
 				int dow = icaltime_day_of_week(next) - 1;
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 				w->ev = vevent;
+				w->cal = cal;
 				w->minutes_from = next.hour * 60 + next.minute;
 				w->minutes_to = (next.hour + duration.hours) * 60 + next.minute + duration.minutes;
 				w->next = cw->events_week[dow];
@@ -287,6 +288,7 @@ static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
 				int dow = icaltime_day_of_week(dtstart) - 1;
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 				w->ev = vevent;
+				w->cal = cal;
 				w->minutes_from = dtstart.hour * 60 + dtstart.minute;
 				w->minutes_to = dtend.hour * 60 + dtend.minute;
 				w->next = cw->events_week[dow];
@@ -296,9 +298,9 @@ static void add_event_from_calendar(gpointer user_data, icalcomponent* vevent)
 	}
 }
 
-void week_view_add_event(WeekView* wv, icalcomponent* vevent)
+void week_view_add_event(WeekView* wv, Calendar* cal, icalcomponent* vevent)
 {
-	add_event_from_calendar(wv, vevent);
+	add_event_from_calendar(wv, cal, vevent);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 

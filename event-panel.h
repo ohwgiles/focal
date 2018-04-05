@@ -20,8 +20,11 @@
 #define FOCAL_TYPE_EVENT_PANEL (event_panel_get_type())
 G_DECLARE_FINAL_TYPE(EventPanel, event_panel, FOCAL, EVENT_PANEL, GtkBox)
 
+struct _Calendar;
+typedef struct _Calendar Calendar;
+
 GtkWidget* event_panel_new();
 
-void event_panel_set_event(EventPanel* ew, icalcomponent* ev);
+void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev);
 
 #endif //EVENT_PANEL_H
