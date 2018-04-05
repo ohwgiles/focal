@@ -110,8 +110,10 @@ static void rpc_handle_cmd(const char* cmd, void* data)
 	}
 }
 
-static void cal_add_vevent(WeekView* widget, icalcomponent* ev, Calendar* cal)
+static void cal_add_vevent(WeekView* widget, icalcomponent* ev, FocalMain* fm)
 {
+	// TODO pass calendar association with callback
+	Calendar* cal = FOCAL_CALENDAR(fm->calendars->data);
 	calendar_add_event(cal, ev);
 }
 
@@ -128,6 +130,41 @@ static void event_delete(EventPanel* event_panel, icalcomponent* ev, FocalMain* 
 	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
+static void load_calendar_config(FocalMain* fm)
+{
+	GKeyFile* config = g_key_file_new();
+	gchar** groups;
+	gsize num_cals = 0;
+	const char *config_dir, *home;
+	char* config_file;
+
+	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
+		asprintf(&config_file, "%s/focal.conf", config_dir);
+	else if ((home = g_getenv("HOME")))
+		asprintf(&config_file, "%s/.config/focal.conf", home);
+	else
+		return (void) fprintf(stderr, "Could not find .config path\n");
+
+	g_key_file_load_from_file(config, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
+	groups = g_key_file_get_groups(config, &num_cals);
+
+	for (int i = 0; i < num_cals; ++i) {
+		gchar* url = g_key_file_get_string(config, groups[i], "url", NULL);
+		gchar* user = g_key_file_get_string(config, groups[i], "user", NULL);
+		gchar* pass = g_key_file_get_string(config, groups[i], "pass", NULL);
+		gchar* email = g_key_file_get_string(config, groups[i], "email", NULL);
+
+		Calendar* rc = remote_calendar_new(url, user, pass);
+		calendar_set_email(rc, email);
+		remote_calendar_sync(FOCAL_REMOTE_CALENDAR(rc));
+
+		fm->calendars = g_slist_append(fm->calendars, rc);
+
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), rc);
+	}
+	g_strfreev(groups);
+}
+
 int main(int argc, char** argv)
 {
 	rpc_status_t rpc = rpc_init();
@@ -142,49 +179,22 @@ int main(int argc, char** argv)
 		return 0;
 	}
 
-	GKeyFile* config = g_key_file_new();
-
-	const char *config_dir, *home;
-	char* config_file;
-	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
-		asprintf(&config_file, "%s/focal.conf", config_dir);
-	else if ((home = g_getenv("HOME")))
-		asprintf(&config_file, "%s/.config/focal.conf", home);
-	else
-		return fprintf(stderr, "Could not find .config path\n"), -1;
-
-	g_key_file_load_from_file(config, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-
-	gchar* url = g_key_file_get_string(config, "main", "url", NULL);
-	gchar* user = g_key_file_get_string(config, "main", "user", NULL);
-	gchar* pass = g_key_file_get_string(config, "main", "pass", NULL);
-	gchar* email = g_key_file_get_string(config, "main", "email", NULL);
-
-	if (!url || !user || !pass)
-		return fprintf(stderr, "Set main/{url,user,pass} in focal.conf\n"), -1;
-
 	gtk_init(&argc, &argv);
 
-	Calendar* rc = remote_calendar_new(url, user, pass);
-	calendar_set_email(rc, email);
-
 	FocalMain fm = {0};
-	fm.calendars = g_slist_append(fm.calendars, rc);
 	fm.mainWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	fm.weekView = week_view_new();
+	load_calendar_config(&fm);
 
 	GtkWidget* event_panel = event_panel_new();
 
 	rpc_server(&rpc_handle_cmd, &fm);
-	remote_calendar_sync(FOCAL_REMOTE_CALENDAR(rc));
 
 	gtk_window_set_type_hint((GtkWindow*) fm.mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
-	g_signal_connect(fm.weekView, "add-vevent", (GCallback) &cal_add_vevent, rc);
+	g_signal_connect(fm.weekView, "add-vevent", (GCallback) &cal_add_vevent, &fm);
 	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, event_panel);
 	g_signal_connect(event_panel, "cal-event-delete", (GCallback) &event_delete, &fm);
-
-	week_view_add_calendar(FOCAL_WEEK_VIEW(fm.weekView), rc);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
