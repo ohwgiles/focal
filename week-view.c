@@ -226,10 +226,9 @@ GtkWidget* week_view_new()
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
-	char buffer[64];
-	ssize_t n = readlink("/etc/localtime", buffer, 63);
-	buffer[n] = '\0';
-	cw->current_tz = icaltimezone_get_builtin_timezone(buffer + strlen("/usr/share/zoneinfo/"));
+	char* zoneinfo_link = realpath("/etc/localtime", NULL);
+	cw->current_tz = icaltimezone_get_builtin_timezone(zoneinfo_link + strlen("/usr/share/zoneinfo/"));
+	free(zoneinfo_link);
 
 	icaltimetype today = icaltime_today();
 	cw->current_view = icaltime_span_new(icaltime_from_day_of_year(icaltime_day_of_year(today) - icaltime_day_of_week(today), today.year),
