@@ -2,7 +2,7 @@ project(focal)
 cmake_minimum_required(VERSION 2.8)
 
 add_definitions(-D_GNU_SOURCE)
-#set(CMAKE_C_FLAGS_DEBUG "-g -Wall -Werror -Wno-error=pointer-sign")
+set(CMAKE_C_FLAGS_DEBUG "-g -Wall -Werror -Wno-pointer-sign")
 
 find_package(PkgConfig REQUIRED)
 

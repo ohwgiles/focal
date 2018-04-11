@@ -70,7 +70,7 @@ struct _EventPanel {
 	Calendar* selected_calendar;
 	icalcomponent* selected_event;
 };
-G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_VBOX)
+G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_BOX)
 
 enum {
 	SIGNAL_EVENT_DELETE,
@@ -119,7 +119,8 @@ static inline GtkWidget* field_label_new(const char* label)
 
 GtkWidget* event_panel_new()
 {
-	EventPanel* e = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
+	EventPanel* e = g_object_new(FOCAL_TYPE_EVENT_PANEL, "orientation", GTK_ORIENTATION_VERTICAL, NULL);
+	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) e), GTK_STYLE_CLASS_BACKGROUND);
 	e->bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
 
 	e->details_button = gtk_toggle_button_new();
@@ -173,12 +174,6 @@ GtkWidget* event_panel_new()
 
 	gtk_box_pack_start(GTK_BOX(e->details), grid_left, TRUE, TRUE, 5);
 	gtk_box_pack_start(GTK_BOX(e->details), e->attendees.layout, TRUE, TRUE, 5);
-
-	// hack
-	GtkStyleContext* sc = gtk_widget_get_style_context(e->bar);
-	GdkRGBA col;
-	gtk_style_context_get_background_color(sc, GTK_STATE_FLAG_NORMAL, &col);
-	gtk_widget_override_background_color(e->details, GTK_STATE_FLAG_NORMAL, &col);
 
 	g_signal_connect(GTK_WIDGET(e), "show", (GCallback) &first_show, NULL);
 	gtk_box_pack_start(GTK_BOX(e), e->bar, FALSE, FALSE, 0);

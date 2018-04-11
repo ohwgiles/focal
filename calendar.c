@@ -45,5 +45,5 @@ void calendar_set_email(Calendar* self, const char* email)
 
 const char* calendar_get_email(Calendar* self)
 {
-	g_object_get_data((GObject*) self, "email");
+	return g_object_get_data((GObject*) self, "email");
 }
