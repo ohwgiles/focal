@@ -14,7 +14,7 @@
 #ifndef CALENDAR_H
 #define CALENDAR_H
 
-#include <glib-object.h>
+#include <gtk/gtk.h>
 #include <libical/ical.h>
 
 #define TYPE_CALENDAR (calendar_get_type())
@@ -35,8 +35,12 @@ void calendar_delete_event(Calendar* self, icalcomponent* event);
 
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
 
+void calendar_set_name(Calendar* self, const char* name);
+
 void calendar_set_email(Calendar* self, const char* email);
 
 const char* calendar_get_email(Calendar* self);
+
+GdkRGBA* calendar_get_color(Calendar* self);
 
 #endif // CALENDAR_H

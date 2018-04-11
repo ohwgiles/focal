@@ -13,7 +13,12 @@
  */
 #include "calendar.h"
 
-G_DEFINE_TYPE(Calendar, calendar, G_TYPE_OBJECT)
+typedef struct {
+	char* name;
+	GdkRGBA color;
+} CalendarPrivate;
+
+G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
 
 void calendar_add_event(Calendar* self, icalcomponent* event)
 {
@@ -38,6 +43,16 @@ void calendar_init(Calendar* self)
 {
 }
 
+void calendar_set_name(Calendar* self, const char* name)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	g_free(priv->name);
+	priv->name = g_strdup(name);
+	double hue = (g_str_hash(name) % USHRT_MAX) / (double) USHRT_MAX;
+	gtk_hsv_to_rgb(hue, 0.7, 0.7, &priv->color.red, &priv->color.green, &priv->color.blue);
+	priv->color.alpha = 0.85;
+}
+
 void calendar_set_email(Calendar* self, const char* email)
 {
 	g_object_set_data((GObject*) self, "email", g_strdup(email));
@@ -46,4 +61,10 @@ void calendar_set_email(Calendar* self, const char* email)
 const char* calendar_get_email(Calendar* self)
 {
 	return g_object_get_data((GObject*) self, "email");
+}
+
+GdkRGBA* calendar_get_color(Calendar* self)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return &priv->color;
 }

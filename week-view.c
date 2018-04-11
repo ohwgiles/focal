@@ -119,12 +119,13 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
 			double yminutescale = HALFHOUR_HEIGHT / 30.0; //(cal->height - header_height) / (60.0 * num_hours_displayed);
 			//double y = cal->y + header_height + hh * halfhour_height - cal->scroll_top;
-
 			double yfrom = tmp->minutes_from * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_top;
 			double yto = tmp->minutes_to * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_top;
 			double x = wv->x + SIDEBAR_WIDTH + d * day_width;
 			//printf("from %d to %d\n", icalcomponent_get_dtstart(event).hour, icalcomponent_get_dtend(event).hour);
-			cairo_set_source_rgba(cr, 0.3, 0.3, 0.8, 0.8);
+			//cairo_set_source_rgba(cr, 0.3, 0.3, 0.8, 0.8);
+			GdkRGBA* color = calendar_get_color(tmp->cal);
+			cairo_set_source_rgba(cr, color->red, color->green, color->blue, color->alpha);
 			cairo_rectangle(cr, x + 1, yfrom + 1, day_width - 2, yto - yfrom - 2);
 			cairo_fill(cr);
 

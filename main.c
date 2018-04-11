@@ -147,6 +147,7 @@ static void load_calendar_config(FocalMain* fm)
 		gchar* email = g_key_file_get_string(config, groups[i], "email", NULL);
 
 		Calendar* rc = remote_calendar_new(url, user, pass);
+		calendar_set_name(rc, groups[i]);
 		calendar_set_email(rc, email);
 		remote_calendar_sync(FOCAL_REMOTE_CALENDAR(rc));
 
