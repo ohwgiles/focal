@@ -69,6 +69,9 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 				partstat = icalproperty_get_first_parameter(attendees, ICAL_PARTSTAT_PARAMETER);
 				// TODO what is the effect of this on common caldav servers?
 				icalproperty_remove_parameter_by_kind(attendees, ICAL_RSVP_PARAMETER);
+				// break from both loops
+				attendees = NULL;
+				break;
 			}
 		}
 	}
