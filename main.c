@@ -51,12 +51,12 @@ static icalcomponent* icalcomponent_from_file(const char* path)
 	return NULL;
 }
 
-static void focal_add_event(FocalMain* focal, icalcomponent* vev)
+static void focal_add_event(FocalMain* focal, CalendarEvent ce)
 {
 	Calendar* cal = NULL;
 	icalparameter* partstat = NULL;
 
-	for (icalproperty* attendees = icalcomponent_get_first_property(vev, ICAL_ATTENDEE_PROPERTY); attendees; attendees = icalcomponent_get_next_property(vev, ICAL_ATTENDEE_PROPERTY)) {
+	for (icalproperty* attendees = icalcomponent_get_first_property(ce.v, ICAL_ATTENDEE_PROPERTY); attendees; attendees = icalcomponent_get_next_property(ce.v, ICAL_ATTENDEE_PROPERTY)) {
 		const char* cal_addr = icalproperty_get_attendee(attendees);
 		if (strncasecmp(cal_addr, "mailto:", 7) != 0)
 			continue;
@@ -80,7 +80,7 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 	if (!cal)
 		cal = FOCAL_CALENDAR(focal->calendars->data);
 
-	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), cal, vev);
+	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), cal, ce);
 
 	GtkWidget* dialog;
 	dialog = gtk_message_dialog_new(GTK_WINDOW(focal->mainWindow),
@@ -88,7 +88,7 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 									GTK_MESSAGE_ERROR,
 									GTK_BUTTONS_YES_NO,
 									"Add event \"%s\" to calendar?",
-									icalcomponent_get_summary(vev));
+									icalcomponent_get_summary(ce.v));
 	int resp = gtk_dialog_run(GTK_DIALOG(dialog));
 	if (resp == GTK_RESPONSE_YES) {
 		// TODO allow selecting a different response
@@ -96,9 +96,9 @@ static void focal_add_event(FocalMain* focal, icalcomponent* vev)
 			icalparameter_set_partstat(partstat, ICAL_PARTSTAT_ACCEPTED);
 		}
 
-		calendar_add_event(cal, vev);
+		calendar_add_event(cal, ce);
 	} else {
-		week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), vev);
+		week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ce);
 	}
 	gtk_widget_destroy(dialog);
 }
@@ -108,21 +108,25 @@ static void rpc_handle_cmd(const char* cmd, void* data)
 	icalcomponent* c = icalcomponent_from_file(cmd);
 	if (c) {
 		icalcomponent* vev = icalcomponent_get_first_real_component(c);
-		if (vev)
-			focal_add_event(data, vev);
+		if (vev) {
+			CalendarEvent ce = {.v = vev};
+			focal_add_event(data, ce);
+		}
 	}
 }
 
-static void cal_event_selected(WeekView* widget, Calendar* cal, icalcomponent* e, EventPanel* ew)
+static void cal_event_selected(WeekView* widget, Calendar* cal, CalendarEvent* ce, EventPanel* ew)
 {
-	event_panel_set_event(ew, cal, e);
+	if (ce) {
+		event_panel_set_event(ew, cal, *ce);
+	}
 }
 
-static void event_delete(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
+static void event_delete(EventPanel* event_panel, Calendar* cal, CalendarEvent* ce, FocalMain* focal)
 {
 	// TODO "are you sure?" popup
-	calendar_delete_event(FOCAL_CALENDAR(cal), ev);
-	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
+	calendar_delete_event(FOCAL_CALENDAR(cal), *ce);
+	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), *ce);
 }
 
 static void load_calendar_config(FocalMain* fm)

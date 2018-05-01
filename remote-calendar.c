@@ -21,31 +21,36 @@ struct _RemoteCalendar {
 };
 G_DEFINE_TYPE(RemoteCalendar, remote_calendar, TYPE_CALENDAR)
 
-static void add_event(Calendar* c, icalcomponent* event)
+static void add_event(Calendar* c, CalendarEvent event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
-	caldav_client_put(rc->caldav, event, NULL);
+	caldav_client_put(rc->caldav, event.v, NULL);
 }
 
-static void delete_event(Calendar* c, icalcomponent* event)
+static void delete_event(Calendar* c, CalendarEvent event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
-	caldav_client_delete(rc->caldav, event, NULL);
+	caldav_client_delete(rc->caldav, event.v, event.priv);
 }
 
 static void each_event(Calendar* c, CalendarEachEventCallback callback, void* user)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
 	for (GSList* p = rc->events; p; p = p->next) {
-		callback(user, (Calendar*) rc, p->data);
+		if (p->data)
+			callback(user, (Calendar*) rc, *((CalendarEvent*) p->data));
 	}
 }
 
 static void free_events(RemoteCalendar* rc)
 {
 	for (GSList* p = rc->events; p; p = p->next) {
-		if (p->data)
-			icalcomponent_free(icalcomponent_get_parent((icalcomponent*) p->data));
+		if (p->data) {
+			CalendarEvent* ce = (CalendarEvent*) p->data;
+			icalcomponent_free(icalcomponent_get_parent(ce->v));
+			free(ce->priv);
+			free(ce);
+		}
 	}
 	g_slist_free(rc->events);
 }

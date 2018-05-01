@@ -16,6 +16,7 @@
 #include <string.h>
 
 #include "caldav-client.h"
+#include "calendar.h"
 
 struct _CaldavClient {
 	char* url;
@@ -36,6 +37,7 @@ typedef struct {
 	GHashTable* ns_aliases;
 	GSList* hrefs;
 	GSList* event_list;
+	char* current_href;
 } XmlParseCtx;
 
 static void xmlns_free(XmlNs* ns)
@@ -134,11 +136,23 @@ static void xmlparse_find_hrefs(void* ctx, const xmlChar* name)
 static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 {
 	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
-	if (xml_tag_matches(xpc, name, "urn:ietf:params:xml:ns:caldav", "calendar-data")) {
+	if (xml_tag_matches(xpc, name, "DAV:", "href")) {
+		// store the href for the current response element
+		g_assert_null(xpc->current_href);
+		xpc->current_href = g_strdup(xpc->chars.str);
+	} else if (xml_tag_matches(xpc, name, "DAV:", "response")) {
+		g_assert_nonnull(xpc->current_href);
+		g_free(xpc->current_href);
+		xpc->current_href = NULL;
+	} else if (xml_tag_matches(xpc, name, "urn:ietf:params:xml:ns:caldav", "calendar-data")) {
 		icalcomponent* comp = icalparser_parse_string(xpc->chars.str);
 		icalcomponent* vevent = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
+
 		if (vevent) {
-			xpc->event_list = g_slist_append(xpc->event_list, vevent);
+			CalendarEvent* ce = malloc(sizeof(CalendarEvent));
+			ce->v = vevent;
+			ce->priv = g_strdup(xpc->current_href);
+			xpc->event_list = g_slist_append(xpc->event_list, ce);
 		}
 	}
 
@@ -239,20 +253,21 @@ gboolean caldav_client_put(CaldavClient* cc, icalcomponent* event, const char* u
 	if (!curl)
 		return FALSE;
 
+	struct curl_slist* headers = NULL;
+	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
+	headers = curl_slist_append(headers, "Expect:");
+
 	char* purl;
 	if (url) {
-		purl = g_strdup(url);
+		char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
+		asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
 	} else {
 		asprintf(&purl, "%s/%s.ics", cc->url, icalcomponent_get_uid(event));
+		headers = curl_slist_append(headers, "If-None-Match: *");
 	}
 
 	curl_easy_setopt(curl, CURLOPT_URL, purl);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-	struct curl_slist* headers = NULL;
-	headers = curl_slist_append(headers, "If-None-Match: *");
-	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
-	headers = curl_slist_append(headers, "Expect:");
-
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
 	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
@@ -279,7 +294,8 @@ gboolean caldav_client_delete(CaldavClient* cc, icalcomponent* event, const char
 
 	char* purl;
 	if (url) {
-		purl = g_strdup(url);
+		char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
+		asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
 	} else {
 		asprintf(&purl, "%s/%s.ics", cc->url, icalcomponent_get_uid(event));
 	}

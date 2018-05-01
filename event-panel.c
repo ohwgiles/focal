@@ -68,7 +68,7 @@ struct _EventPanel {
 	AttendeeLayout attendees;
 
 	Calendar* selected_calendar;
-	icalcomponent* selected_event;
+	CalendarEvent selected_event;
 };
 G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_BOX)
 
@@ -106,7 +106,7 @@ static void first_show(GtkWidget* widget)
 static void delete_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_calendar, ew->selected_event);
+	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_calendar, &ew->selected_event);
 }
 
 static inline GtkWidget* field_label_new(const char* label)
@@ -181,25 +181,25 @@ GtkWidget* event_panel_new()
 	return (GtkWidget*) e;
 }
 
-void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
+void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ce)
 {
 	attendee_layout_clear(&ew->attendees);
-	if (cal && ev) {
+	if (cal && ce.v) {
 		icaltimetype dt;
 		char time_buf[6];
-		gtk_label_set_label(GTK_LABEL(ew->event_label), icalcomponent_get_summary(ev));
+		gtk_label_set_label(GTK_LABEL(ew->event_label), icalcomponent_get_summary(ce.v));
 
 		// TODO: timezone conversion
-		dt = icalcomponent_get_dtstart(ev);
+		dt = icalcomponent_get_dtstart(ce.v);
 		snprintf(time_buf, 6, "%02d:%02d", dt.hour, dt.minute);
 		gtk_label_set_label(GTK_LABEL(ew->starts_at), time_buf);
 
-		dt = icalcomponent_get_dtend(ev);
+		dt = icalcomponent_get_dtend(ce.v);
 		snprintf(time_buf, 6, "%02d:%02d", dt.hour, dt.minute);
 		gtk_label_set_label(GTK_LABEL(ew->ends_at), time_buf);
 
-		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), icalcomponent_get_description(ev), -1);
-		for (icalproperty* attendee = icalcomponent_get_first_property(ev, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ev, ICAL_ATTENDEE_PROPERTY)) {
+		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), icalcomponent_get_description(ce.v), -1);
+		for (icalproperty* attendee = icalcomponent_get_first_property(ce.v, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ce.v, ICAL_ATTENDEE_PROPERTY)) {
 			attendee_layout_add(&ew->attendees, icalproperty_get_parameter_as_string(attendee, "CN"));
 		}
 		gtk_widget_show_all(ew->attendees.layout);
@@ -210,12 +210,12 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 		}
 		gtk_widget_show(ew->bar);
 		ew->selected_calendar = cal;
-		ew->selected_event = ev;
+		ew->selected_event = ce;
 	} else {
 		gtk_widget_hide(ew->details);
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ew->details_button), FALSE);
 		gtk_widget_hide(ew->bar);
 		ew->selected_calendar = NULL;
-		ew->selected_event = NULL;
+		memset(&ew->selected_event, 0, sizeof(CalendarEvent));
 	}
 }
