@@ -174,9 +174,15 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 				break;
 			}
 		}
-		if (tmp)
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, &tmp->ev);
-		else
+
+		GdkRectangle rect;
+		if (tmp) {
+			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+			rect.x = dow * rect.width + SIDEBAR_WIDTH;
+			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_top) * HALFHOUR_HEIGHT / 30;
+			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, &tmp->ev, &rect);
+		} else
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL, NULL);
 	}
 	return TRUE;
@@ -184,7 +190,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 
 static void week_view_class_init(WeekViewClass* klass)
 {
-	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)

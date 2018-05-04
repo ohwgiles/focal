@@ -53,15 +53,12 @@ static void attendee_layout_relayout(GtkWidget* layout, GdkRectangle* allocation
 
 struct _EventPanel {
 	GtkBox parent;
-	GtkWidget* bar;
-	GtkWidget* details_button;
 	GtkWidget* event_label;
 	GtkWidget* edit_button;
 	GtkWidget* delete_button;
 	GtkWidget* save_button;
 	GtkWidget* cancel_button;
 
-	GtkWidget* details;
 	GtkWidget* starts_at;
 	GtkWidget* duration;
 	GtkTextBuffer* description;
@@ -86,21 +83,6 @@ static void event_panel_class_init(EventPanelClass* klass)
 
 static void event_panel_init(EventPanel* self)
 {
-	gtk_widget_set_valign((GtkWidget*) self, GTK_ALIGN_END);
-}
-
-static void show_details(GtkToggleButton* togglebutton, gpointer user_data)
-{
-	EventPanel* e = FOCAL_EVENT_PANEL(user_data);
-	gtk_widget_set_visible(e->details, gtk_toggle_button_get_active(togglebutton));
-}
-
-static void first_show(GtkWidget* widget)
-{
-	EventPanel* ew = FOCAL_EVENT_PANEL(widget);
-	gtk_widget_hide(ew->details);
-	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ew->details_button), FALSE);
-	gtk_widget_hide(ew->bar);
 }
 
 static void delete_clicked(GtkButton* button, gpointer user_data)
@@ -121,63 +103,59 @@ GtkWidget* event_panel_new()
 {
 	EventPanel* e = g_object_new(FOCAL_TYPE_EVENT_PANEL, "orientation", GTK_ORIENTATION_VERTICAL, NULL);
 	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) e), GTK_STYLE_CLASS_BACKGROUND);
-	e->bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
-
-	e->details_button = gtk_toggle_button_new();
-	gtk_button_set_image(GTK_BUTTON(e->details_button), gtk_image_new_from_icon_name("document-properties", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	gtk_action_bar_pack_start(GTK_ACTION_BAR(e->bar), e->details_button);
-	g_signal_connect(e->details_button, "toggled", (GCallback) &show_details, e);
+	GtkWidget* bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
 
 	e->event_label = gtk_label_new("");
-	gtk_action_bar_pack_start(GTK_ACTION_BAR(e->bar), e->event_label);
+	gtk_action_bar_set_center_widget(GTK_ACTION_BAR(bar), e->event_label);
 
 	e->delete_button = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->delete_button), gtk_image_new_from_icon_name("edit-delete", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	gtk_action_bar_pack_end(GTK_ACTION_BAR(e->bar), e->delete_button);
+	gtk_action_bar_pack_end(GTK_ACTION_BAR(bar), e->delete_button);
 
 	e->edit_button = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->edit_button), gtk_image_new_from_icon_name("gtk-edit", GTK_ICON_SIZE_LARGE_TOOLBAR));
 	g_signal_connect(e->delete_button, "clicked", (GCallback) &delete_clicked, e);
-	gtk_action_bar_pack_end(GTK_ACTION_BAR(e->bar), e->edit_button);
+	gtk_action_bar_pack_start(GTK_ACTION_BAR(bar), e->edit_button);
 
-	e->details = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-
-	GtkWidget* grid_left = gtk_grid_new();
-	gtk_grid_set_column_spacing(GTK_GRID(grid_left), 5);
-	gtk_grid_set_row_spacing(GTK_GRID(grid_left), 5);
-	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Starts at:</b>"), 0, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Duration:</b>"), 0, 1, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Description</b>"), 0, 2, 2, 1);
+	GtkWidget* grid = gtk_grid_new();
+	g_object_set(grid, "margin", 5, NULL);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 5);
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 5);
 
 	e->starts_at = gtk_label_new("");
-	gtk_widget_set_halign(e->starts_at, GTK_ALIGN_END);
+	gtk_widget_set_halign(e->starts_at, GTK_ALIGN_START);
 	e->duration = gtk_label_new("");
-	gtk_widget_set_halign(e->duration, GTK_ALIGN_END);
+	gtk_widget_set_halign(e->duration, GTK_ALIGN_START);
 
 	GtkWidget* description_scrolled = gtk_scrolled_window_new(0, 0);
 	// TODO: infer appropriate height somehow
-	gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(description_scrolled), 100);
+	gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(description_scrolled), 150);
+	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(description_scrolled), 100);
 	GtkWidget* description_view = gtk_text_view_new();
 	gtk_widget_set_hexpand(description_view, TRUE);
 	gtk_container_add(GTK_CONTAINER(description_scrolled), description_view);
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(description_view), GTK_WRAP_WORD);
 	e->description = gtk_text_view_get_buffer(GTK_TEXT_VIEW(description_view));
-	gtk_text_buffer_set_text(e->description, "Hello, this is some text", -1);
-	gtk_grid_attach(GTK_GRID(grid_left), e->starts_at, 1, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), e->duration, 1, 1, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), description_scrolled, 0, 3, 2, 1);
+
+	gtk_grid_attach(GTK_GRID(grid), e->starts_at, 0, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), e->duration, 1, 0, 1, 1);
+
+	GtkWidget* attendees_scrolled = gtk_scrolled_window_new(0, 0);
+	// TODO: infer appropriate height somehow
+	gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(attendees_scrolled), 80);
+	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(attendees_scrolled), 100);
 
 	e->attendees.layout = gtk_layout_new(NULL, NULL);
 	e->attendees.cheight = 20; // TODO: base on actual widget size
-
 	g_signal_connect(G_OBJECT(e->attendees.layout), "size-allocate", G_CALLBACK(attendee_layout_relayout), &e->attendees);
+	gtk_container_add(GTK_CONTAINER(attendees_scrolled), e->attendees.layout);
 
-	gtk_box_pack_start(GTK_BOX(e->details), grid_left, TRUE, TRUE, 5);
-	gtk_box_pack_start(GTK_BOX(e->details), e->attendees.layout, TRUE, TRUE, 5);
+	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 0, 1, 2, 1);
 
-	g_signal_connect(GTK_WIDGET(e), "show", (GCallback) &first_show, NULL);
-	gtk_box_pack_start(GTK_BOX(e), e->bar, FALSE, FALSE, 0);
-	gtk_box_pack_start(GTK_BOX(e), e->details, TRUE, TRUE, 0);
+	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 2, 2, 1);
+
+	gtk_box_pack_start(GTK_BOX(e), bar, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(e), grid, TRUE, TRUE, 0);
 	return (GtkWidget*) e;
 }
 
@@ -214,13 +192,9 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ce)
 			gtk_widget_get_allocation(ew->attendees.layout, &alloc);
 			attendee_layout_relayout(ew->attendees.layout, &alloc, &ew->attendees);
 		}
-		gtk_widget_show(ew->bar);
 		ew->selected_calendar = cal;
 		ew->selected_event = ce;
 	} else {
-		gtk_widget_hide(ew->details);
-		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ew->details_button), FALSE);
-		gtk_widget_hide(ew->bar);
 		ew->selected_calendar = NULL;
 		memset(&ew->selected_event, 0, sizeof(CalendarEvent));
 	}

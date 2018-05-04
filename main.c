@@ -25,6 +25,8 @@ typedef struct {
 	GtkWidget* mainWindow;
 	GSList* calendars;
 	GtkWidget* weekView;
+	GtkWidget* popover;
+	GtkWidget* eventDetail;
 } FocalMain;
 
 static char* icc_read_stream(char* s, size_t sz, void* ud)
@@ -115,10 +117,12 @@ static void rpc_handle_cmd(const char* cmd, void* data)
 	}
 }
 
-static void cal_event_selected(WeekView* widget, Calendar* cal, CalendarEvent* ce, EventPanel* ew)
+static void cal_event_selected(WeekView* widget, Calendar* cal, CalendarEvent* ce, GdkRectangle* rect, FocalMain* fm)
 {
 	if (ce) {
-		event_panel_set_event(ew, cal, *ce);
+		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
+		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), cal, *ce);
+		gtk_popover_popup(GTK_POPOVER(fm->popover));
 	}
 }
 
@@ -184,25 +188,26 @@ int main(int argc, char** argv)
 	FocalMain fm = {0};
 	fm.mainWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
 	fm.weekView = week_view_new();
+	fm.eventDetail = event_panel_new();
 	load_calendar_config(&fm);
 
-	GtkWidget* event_panel = event_panel_new();
+	fm.popover = gtk_popover_new(fm.weekView);
+	gtk_popover_set_position(GTK_POPOVER(fm.popover), GTK_POS_RIGHT);
+	gtk_container_add(GTK_CONTAINER(fm.popover), fm.eventDetail);
+	gtk_widget_show_all(fm.eventDetail);
 
 	rpc_server(&rpc_handle_cmd, &fm);
 
 	gtk_window_set_type_hint((GtkWindow*) fm.mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
-	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, event_panel);
-	g_signal_connect(event_panel, "cal-event-delete", (GCallback) &event_delete, &fm);
+	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, &fm);
+	g_signal_connect(fm.eventDetail, "cal-event-delete", (GCallback) &event_delete, &fm);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
-
-	GtkWidget* overlay = gtk_overlay_new();
-	gtk_container_add(GTK_CONTAINER(overlay), fm.weekView);
-	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), event_panel);
 	gtk_window_set_titlebar(GTK_WINDOW(fm.mainWindow), header);
-	gtk_container_add(GTK_CONTAINER(fm.mainWindow), overlay);
+
+	gtk_container_add(GTK_CONTAINER(fm.mainWindow), fm.weekView);
 
 	g_signal_connect(fm.mainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 
