@@ -63,7 +63,7 @@ struct _EventPanel {
 
 	GtkWidget* details;
 	GtkWidget* starts_at;
-	GtkWidget* ends_at;
+	GtkWidget* duration;
 	GtkTextBuffer* description;
 	AttendeeLayout attendees;
 
@@ -146,13 +146,13 @@ GtkWidget* event_panel_new()
 	gtk_grid_set_column_spacing(GTK_GRID(grid_left), 5);
 	gtk_grid_set_row_spacing(GTK_GRID(grid_left), 5);
 	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Starts at:</b>"), 0, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Ends at:</b>"), 0, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Duration:</b>"), 0, 1, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid_left), field_label_new("<b>Description</b>"), 0, 2, 2, 1);
 
 	e->starts_at = gtk_label_new("");
 	gtk_widget_set_halign(e->starts_at, GTK_ALIGN_END);
-	e->ends_at = gtk_label_new("");
-	gtk_widget_set_halign(e->ends_at, GTK_ALIGN_END);
+	e->duration = gtk_label_new("");
+	gtk_widget_set_halign(e->duration, GTK_ALIGN_END);
 
 	GtkWidget* description_scrolled = gtk_scrolled_window_new(0, 0);
 	// TODO: infer appropriate height somehow
@@ -164,7 +164,7 @@ GtkWidget* event_panel_new()
 	e->description = gtk_text_view_get_buffer(GTK_TEXT_VIEW(description_view));
 	gtk_text_buffer_set_text(e->description, "Hello, this is some text", -1);
 	gtk_grid_attach(GTK_GRID(grid_left), e->starts_at, 1, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid_left), e->ends_at, 1, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid_left), e->duration, 1, 1, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid_left), description_scrolled, 0, 3, 2, 1);
 
 	e->attendees.layout = gtk_layout_new(NULL, NULL);
@@ -185,18 +185,24 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ce)
 {
 	attendee_layout_clear(&ew->attendees);
 	if (cal && ce.v) {
-		icaltimetype dt;
-		char time_buf[6];
+		char time_buf[64];
 		gtk_label_set_label(GTK_LABEL(ew->event_label), icalcomponent_get_summary(ce.v));
 
 		// TODO: timezone conversion
-		dt = icalcomponent_get_dtstart(ce.v);
+		icaltimetype dt = icalcomponent_get_dtstart(ce.v);
 		snprintf(time_buf, 6, "%02d:%02d", dt.hour, dt.minute);
 		gtk_label_set_label(GTK_LABEL(ew->starts_at), time_buf);
 
-		dt = icalcomponent_get_dtend(ce.v);
-		snprintf(time_buf, 6, "%02d:%02d", dt.hour, dt.minute);
-		gtk_label_set_label(GTK_LABEL(ew->ends_at), time_buf);
+		// TODO: handle very long events
+		struct icaldurationtype dur = icalcomponent_get_duration(ce.v);
+		if (dur.hours > 0) {
+			if (dur.minutes > 0)
+				snprintf(time_buf, 64, "%d hours %d minutes", dur.hours, dur.minutes);
+			else
+				snprintf(time_buf, 64, "%d hours", dur.hours);
+		} else
+			snprintf(time_buf, 64, "%d minutes", dur.minutes);
+		gtk_label_set_label(GTK_LABEL(ew->duration), time_buf);
 
 		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), icalcomponent_get_description(ce.v), -1);
 		for (icalproperty* attendee = icalcomponent_get_first_property(ce.v, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ce.v, ICAL_ATTENDEE_PROPERTY)) {
