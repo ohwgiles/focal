@@ -225,7 +225,9 @@ int main(int argc, char** argv)
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
 	gtk_window_set_titlebar(GTK_WINDOW(fm.mainWindow), header);
 
-	gtk_container_add(GTK_CONTAINER(fm.mainWindow), fm.weekView);
+	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
+	gtk_container_add(GTK_CONTAINER(sw), fm.weekView);
+	gtk_container_add(GTK_CONTAINER(fm.mainWindow), sw);
 
 	g_signal_connect(fm.mainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
 

@@ -32,7 +32,8 @@ typedef struct _EventWidget EventWidget;
 struct _WeekView {
 	GtkDrawingArea drawing_area;
 	int x, y, width, height;
-	double scroll_top;
+	double scroll_pos;
+	GtkAdjustment* adj;
 	EventWidget* events_week[7];
 	int current_week;
 	int current_year;
@@ -51,9 +52,30 @@ enum {
 
 static gint week_view_signals[LAST_SIGNAL] = {0};
 
-G_DEFINE_TYPE(WeekView, week_view, GTK_TYPE_DRAWING_AREA)
+enum {
+	PROP_0,
+	PROP_HADJUSTMENT,
+	PROP_VADJUSTMENT,
+	PROP_HSCROLL_POLICY,
+	PROP_VSCROLL_POLICY,
+};
 
 #define HEADER_HEIGHT 50.5
+
+// Implemented from GtkScrollable, causes the scroll bar to start below the header
+static gboolean get_border(GtkScrollable* scrollable, GtkBorder* border)
+{
+	border->top = HEADER_HEIGHT;
+	return TRUE;
+}
+
+static void week_view_scrollable_init(GtkScrollableInterface* iface)
+{
+	iface->get_border = get_border;
+}
+
+G_DEFINE_TYPE_WITH_CODE(WeekView, week_view, GTK_TYPE_DRAWING_AREA, G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE, week_view_scrollable_init))
+
 #define SIDEBAR_WIDTH 50.5
 #define HALFHOUR_HEIGHT 30.0
 
@@ -66,10 +88,10 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	cairo_set_source_rgb(cr, col, col, col);
 	cairo_set_line_width(cr, 1.0);
 
-	const int first_visible_halfhour = wv->scroll_top / HALFHOUR_HEIGHT + 1;
+	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT + 1;
 
 	for (int hh = first_visible_halfhour;; ++hh) {
-		double y = wv->y + HEADER_HEIGHT + hh * HALFHOUR_HEIGHT - wv->scroll_top;
+		double y = wv->y + HEADER_HEIGHT + hh * HALFHOUR_HEIGHT - wv->scroll_pos;
 		if (y > wv->y + wv->height)
 			break;
 		cairo_move_to(cr, wv->x, y);
@@ -119,8 +141,8 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
 			double yminutescale = HALFHOUR_HEIGHT / 30.0; //(cal->height - header_height) / (60.0 * num_hours_displayed);
 			//double y = cal->y + header_height + hh * halfhour_height - cal->scroll_top;
-			double yfrom = tmp->minutes_from * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_top;
-			double yto = tmp->minutes_to * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_top;
+			double yfrom = tmp->minutes_from * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_pos;
+			double yto = tmp->minutes_to * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_pos;
 			double x = wv->x + SIDEBAR_WIDTH + d * day_width;
 			//printf("from %d to %d\n", icalcomponent_get_dtstart(event).hour, icalcomponent_get_dtend(event).hour);
 			//cairo_set_source_rgba(cr, 0.3, 0.3, 0.8, 0.8);
@@ -135,7 +157,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		}
 	}
 
-	double nowY = wv->y + HEADER_HEIGHT + wv->now.minutes * HALFHOUR_HEIGHT / 30 - wv->scroll_top;
+	double nowY = wv->y + HEADER_HEIGHT + wv->now.minutes * HALFHOUR_HEIGHT / 30 - wv->scroll_pos;
 	cairo_set_source_rgb(cr, 1, 0, 0);
 	cairo_set_dash(cr, NULL, 0, 0);
 	cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + wv->now.dow * day_width, nowY);
@@ -150,13 +172,6 @@ static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data
 	return FALSE;
 }
 
-static gboolean on_scroll(GtkWidget* widget, GdkEventScroll* ev, gpointer user_data)
-{
-	FOCAL_WEEK_VIEW(widget)->scroll_top += 15 * ev->delta_y;
-	gtk_widget_queue_draw(widget);
-	return FALSE;
-}
-
 static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointer data)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(widget);
@@ -166,7 +181,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			return TRUE;
 
 		int dow = 7 * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
-		int minutesAt = (event->y - HEADER_HEIGHT + wv->scroll_top) * 30 / HALFHOUR_HEIGHT;
+		int minutesAt = (event->y - HEADER_HEIGHT + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
 
 		EventWidget* tmp;
 		for (tmp = wv->events_week[dow]; tmp; tmp = tmp->next) {
@@ -179,7 +194,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 		if (tmp) {
 			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
 			rect.x = dow * rect.width + SIDEBAR_WIDTH;
-			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_top) * HALFHOUR_HEIGHT / 30;
+			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, &tmp->ev, &rect);
 		} else
@@ -188,27 +203,87 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 	return TRUE;
 }
 
+static void adjustment_changed(GtkAdjustment* adjustment, WeekView* wv)
+{
+	wv->scroll_pos = gtk_adjustment_get_value(adjustment);
+	gtk_widget_queue_draw(GTK_WIDGET(wv));
+}
+
+static void set_vadjustment(WeekView* wv, GtkAdjustment* adjustment)
+{
+	if (!adjustment)
+		return;
+
+	// this function should only be called once with a real adjustment
+	g_assert_null(wv->adj);
+
+	wv->adj = g_object_ref_sink(adjustment);
+	g_signal_connect(adjustment, "value-changed", G_CALLBACK(adjustment_changed), wv);
+}
+
+static void set_property(GObject* object, guint prop_id, const GValue* value, GParamSpec* pspec)
+{
+	if (prop_id == PROP_HADJUSTMENT) {
+		// ignored, horizontal scrolling not supported
+	} else if (prop_id == PROP_VADJUSTMENT) {
+		set_vadjustment(FOCAL_WEEK_VIEW(object), g_value_get_object(value));
+	} else {
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
+static void get_property(GObject* object, guint prop_id, GValue* value, GParamSpec* pspec)
+{
+	if (prop_id == PROP_HADJUSTMENT) {
+		// set to NULL, horizontal scrolling not supported
+		g_value_set_object(value, NULL);
+	} else if (prop_id == PROP_VADJUSTMENT) {
+		g_value_set_object(value, FOCAL_WEEK_VIEW(object)->adj);
+	} else if (prop_id == PROP_HSCROLL_POLICY || prop_id == PROP_VSCROLL_POLICY) {
+		g_value_set_enum(value, GTK_SCROLL_MINIMUM);
+	} else {
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
 static void week_view_class_init(WeekViewClass* klass)
 {
-	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
+	GObjectClass* goc = (GObjectClass*) klass;
+
+	((GObjectClass*) goc)->set_property = set_property;
+	((GObjectClass*) goc)->get_property = get_property;
+	g_object_class_override_property((GObjectClass*) goc, PROP_HADJUSTMENT, "hadjustment");
+	g_object_class_override_property((GObjectClass*) goc, PROP_VADJUSTMENT, "vadjustment");
+	g_object_class_override_property((GObjectClass*) goc, PROP_HSCROLL_POLICY, "hscroll-policy");
+	g_object_class_override_property((GObjectClass*) goc, PROP_VSCROLL_POLICY, "vscroll-policy");
+
+	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(widget);
+	g_assert_nonnull(wv->adj);
 
 	wv->width = allocation->width;
 	wv->height = allocation->height;
+
+	gtk_adjustment_configure(wv->adj,
+							 wv->scroll_pos,
+							 0,
+							 24 * 2 * HALFHOUR_HEIGHT + HEADER_HEIGHT,
+							 0.1 * wv->height,
+							 0.9 * wv->height,
+							 wv->height);
 }
 
 static void week_view_init(WeekView* wv)
 {
-	wv->scroll_top = 410;
+	wv->scroll_pos = 410;
 
-	gtk_widget_set_events((GtkWidget*) wv, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_POINTER_MOTION_MASK);
+	gtk_widget_set_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
 	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
-	g_signal_connect(G_OBJECT(wv), "scroll-event", G_CALLBACK(on_scroll), NULL);
 	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
