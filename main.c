@@ -133,6 +133,11 @@ static void event_delete(EventPanel* event_panel, Calendar* cal, CalendarEvent* 
 	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), *ce);
 }
 
+static void event_save(EventPanel* event_panel, Calendar* cal, CalendarEvent* ce, FocalMain* focal)
+{
+	calendar_update_event(FOCAL_CALENDAR(cal), *ce);
+}
+
 static void load_calendar_config(FocalMain* fm)
 {
 	GKeyFile* config = g_key_file_new();
@@ -202,6 +207,7 @@ int main(int argc, char** argv)
 
 	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, &fm);
 	g_signal_connect(fm.eventDetail, "cal-event-delete", (GCallback) &event_delete, &fm);
+	g_signal_connect(fm.eventDetail, "cal-event-save", (GCallback) &event_save, &fm);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);

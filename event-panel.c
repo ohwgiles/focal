@@ -53,10 +53,9 @@ static void attendee_layout_relayout(GtkWidget* layout, GdkRectangle* allocation
 
 struct _EventPanel {
 	GtkBox parent;
-	GtkWidget* event_label;
-	GtkWidget* edit_button;
-	GtkWidget* delete_button;
+	GtkEntryBuffer* event_label;
 	GtkWidget* save_button;
+	GtkWidget* delete_button;
 	GtkWidget* cancel_button;
 
 	GtkWidget* starts_at;
@@ -71,6 +70,7 @@ G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_BOX)
 
 enum {
 	SIGNAL_EVENT_DELETE,
+	SIGNAL_EVENT_SAVE,
 	LAST_SIGNAL
 };
 
@@ -79,6 +79,7 @@ static guint event_panel_signals[LAST_SIGNAL] = {0};
 static void event_panel_class_init(EventPanelClass* klass)
 {
 	event_panel_signals[SIGNAL_EVENT_DELETE] = g_signal_new("cal-event-delete", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+	event_panel_signals[SIGNAL_EVENT_SAVE] = g_signal_new("cal-event-save", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void event_panel_init(EventPanel* self)
@@ -89,6 +90,17 @@ static void delete_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
 	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_calendar, &ew->selected_event);
+}
+
+static void save_clicked(GtkButton* button, gpointer user_data)
+{
+	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
+	icalcomponent_set_summary(ew->selected_event.v, gtk_entry_buffer_get_text(ew->event_label));
+	GtkTextIter start, end;
+	gtk_text_buffer_get_start_iter(ew->description, &start);
+	gtk_text_buffer_get_end_iter(ew->description, &end);
+	icalcomponent_set_description(ew->selected_event.v, gtk_text_buffer_get_text(ew->description, &start, &end, FALSE));
+	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_calendar, &ew->selected_event);
 }
 
 static inline GtkWidget* field_label_new(const char* label)
@@ -105,17 +117,19 @@ GtkWidget* event_panel_new()
 	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) e), GTK_STYLE_CLASS_BACKGROUND);
 	GtkWidget* bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
 
-	e->event_label = gtk_label_new("");
-	gtk_action_bar_set_center_widget(GTK_ACTION_BAR(bar), e->event_label);
+	e->event_label = gtk_entry_buffer_new("", 0);
+	GtkWidget* event_title = gtk_entry_new_with_buffer(e->event_label);
+	gtk_action_bar_set_center_widget(GTK_ACTION_BAR(bar), event_title);
 
 	e->delete_button = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->delete_button), gtk_image_new_from_icon_name("edit-delete", GTK_ICON_SIZE_LARGE_TOOLBAR));
+	g_signal_connect(e->delete_button, "clicked", (GCallback) &delete_clicked, e);
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(bar), e->delete_button);
 
-	e->edit_button = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(e->edit_button), gtk_image_new_from_icon_name("gtk-edit", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	g_signal_connect(e->delete_button, "clicked", (GCallback) &delete_clicked, e);
-	gtk_action_bar_pack_start(GTK_ACTION_BAR(bar), e->edit_button);
+	e->save_button = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(e->save_button), gtk_image_new_from_icon_name("gtk-save", GTK_ICON_SIZE_LARGE_TOOLBAR));
+	g_signal_connect(e->save_button, "clicked", (GCallback) &save_clicked, e);
+	gtk_action_bar_pack_start(GTK_ACTION_BAR(bar), e->save_button);
 
 	GtkWidget* grid = gtk_grid_new();
 	g_object_set(grid, "margin", 5, NULL);
@@ -164,7 +178,7 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ce)
 	attendee_layout_clear(&ew->attendees);
 	if (cal && ce.v) {
 		char time_buf[64];
-		gtk_label_set_label(GTK_LABEL(ew->event_label), icalcomponent_get_summary(ce.v));
+		gtk_entry_buffer_set_text(ew->event_label, icalcomponent_get_summary(ce.v), -1);
 
 		// TODO: timezone conversion
 		icaltimetype dt = icalcomponent_get_dtstart(ce.v);

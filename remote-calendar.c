@@ -27,6 +27,12 @@ static void add_event(Calendar* c, CalendarEvent event)
 	caldav_client_put(rc->caldav, event.v, NULL);
 }
 
+static void update_event(Calendar* c, CalendarEvent event)
+{
+	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
+	caldav_client_put(rc->caldav, event.v, event.priv);
+}
+
 static void delete_event(Calendar* c, CalendarEvent event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
@@ -62,6 +68,7 @@ void remote_calendar_init(RemoteCalendar* rc)
 void remote_calendar_class_init(RemoteCalendarClass* klass)
 {
 	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
+	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 }

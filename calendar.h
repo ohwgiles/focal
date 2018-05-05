@@ -30,11 +30,14 @@ typedef void (*CalendarEachEventCallback)(void* user, Calendar*, CalendarEvent);
 struct _CalendarClass {
 	GObjectClass parent;
 	void (*add_event)(Calendar*, CalendarEvent event);
+	void (*update_event)(Calendar*, CalendarEvent event);
 	void (*delete_event)(Calendar*, CalendarEvent event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
 };
 
 void calendar_add_event(Calendar* self, CalendarEvent event);
+
+void calendar_update_event(Calendar* self, CalendarEvent event);
 
 void calendar_delete_event(Calendar* self, CalendarEvent event);
 

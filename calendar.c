@@ -25,6 +25,11 @@ void calendar_add_event(Calendar* self, CalendarEvent event)
 	FOCAL_CALENDAR_GET_CLASS(self)->add_event(self, event);
 }
 
+void calendar_update_event(Calendar* self, CalendarEvent event)
+{
+	FOCAL_CALENDAR_GET_CLASS(self)->update_event(self, event);
+}
+
 void calendar_delete_event(Calendar* self, CalendarEvent event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->delete_event(self, event);
