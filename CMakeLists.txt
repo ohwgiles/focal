@@ -31,6 +31,7 @@ add_executable(${PROJECT_NAME}
 	caldav-client.c
 	calendar.c
 	event-panel.c
+	local-calendar.c
 	main.c
 	remote-calendar.c
 	rpc.c

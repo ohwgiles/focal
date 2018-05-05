@@ -27,7 +27,12 @@ So far there is no user interface for connecting to an account. You need to crea
 
 ```
 [main]
+type=caldav
 url=http://path/to/caldav/server/endpoint
 user=caldav_user
 pass=caldav_pass
+
+[local]
+type=file
+path=path/to/file.ics
 ```

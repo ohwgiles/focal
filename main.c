@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "event-panel.h"
+#include "local-calendar.h"
 #include "remote-calendar.h"
 #include "rpc.h"
 #include "week-view.h"
@@ -157,19 +158,30 @@ static void load_calendar_config(FocalMain* fm)
 	groups = g_key_file_get_groups(config, &num_cals);
 
 	for (int i = 0; i < num_cals; ++i) {
-		gchar* url = g_key_file_get_string(config, groups[i], "url", NULL);
-		gchar* user = g_key_file_get_string(config, groups[i], "user", NULL);
-		gchar* pass = g_key_file_get_string(config, groups[i], "pass", NULL);
-		gchar* email = g_key_file_get_string(config, groups[i], "email", NULL);
+		Calendar* cal;
+		gchar* type = g_key_file_get_string(config, groups[i], "type", NULL);
+		if (g_strcmp0(type, "caldav") == 0) {
+			gchar* url = g_key_file_get_string(config, groups[i], "url", NULL);
+			gchar* user = g_key_file_get_string(config, groups[i], "user", NULL);
+			gchar* pass = g_key_file_get_string(config, groups[i], "pass", NULL);
 
-		Calendar* rc = remote_calendar_new(url, user, pass);
-		calendar_set_name(rc, groups[i]);
-		calendar_set_email(rc, email);
-		remote_calendar_sync(FOCAL_REMOTE_CALENDAR(rc));
+			cal = remote_calendar_new(url, user, pass);
+			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
+		} else if (g_strcmp0(type, "file") == 0) {
+			gchar* path = g_key_file_get_string(config, groups[i], "path", NULL);
 
-		fm->calendars = g_slist_append(fm->calendars, rc);
+			cal = local_calendar_new(path);
+			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
+		} else {
+			return (void) fprintf(stderr, "Unknown calendar type `%s'\n", type);
+		}
 
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), rc);
+		calendar_set_name(cal, groups[i]);
+		calendar_set_email(cal, g_key_file_get_string(config, groups[i], "email", NULL));
+
+		fm->calendars = g_slist_append(fm->calendars, cal);
+
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 	}
 	g_strfreev(groups);
 }
