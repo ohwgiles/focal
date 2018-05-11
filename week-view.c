@@ -323,6 +323,12 @@ GtkWidget* week_view_new()
 	return (GtkWidget*) cw;
 }
 
+static void event_widget_set_extents(EventWidget* w, icaltimetype start, struct icaldurationtype dur)
+{
+	w->minutes_from = start.hour * 60 + start.minute;
+	w->minutes_to = (start.hour + dur.hours) * 60 + start.minute + dur.minutes;
+}
+
 static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarEvent ce)
 {
 	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
@@ -356,8 +362,7 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarE
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 				w->ev = ce;
 				w->cal = cal;
-				w->minutes_from = next.hour * 60 + next.minute;
-				w->minutes_to = (next.hour + duration.hours) * 60 + next.minute + duration.minutes;
+				event_widget_set_extents(w, next, duration);
 				w->next = cw->events_week[dow];
 				cw->events_week[dow] = w;
 			}
@@ -371,8 +376,7 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarE
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 				w->ev = ce;
 				w->cal = cal;
-				w->minutes_from = dtstart.hour * 60 + dtstart.minute;
-				w->minutes_to = dtend.hour * 60 + dtend.minute;
+				event_widget_set_extents(w, dtstart, duration);
 				w->next = cw->events_week[dow];
 				cw->events_week[dow] = w;
 			}
@@ -413,4 +417,22 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 int week_view_get_current_week(WeekView* wv)
 {
 	return wv->current_week;
+}
+
+void week_view_refresh(WeekView* wv, CalendarEvent ce)
+{
+	// find corresponding EventWidget(s), there may be many if it's a recurring event
+	for (int i = 0; i < 7; ++i) {
+		for (EventWidget** ew = &wv->events_week[i]; *ew; ew = &(*ew)->next) {
+			if (memcmp(&(*ew)->ev, &ce, sizeof(CalendarEvent)) == 0) {
+				// although dtstart may refer to a completely different day in the case
+				// of a recurring event, here we assume the hour/minute is consistent and
+				// so no need to go through all the recurrence rules again
+				icaltimetype dtstart = icalcomponent_get_dtstart(ce.v);
+				struct icaldurationtype duration = icalcomponent_get_duration(ce.v);
+				event_widget_set_extents(*ew, dtstart, duration);
+			}
+		}
+	}
+	gtk_widget_queue_draw((GtkWidget*) wv);
 }

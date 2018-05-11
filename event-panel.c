@@ -11,8 +11,10 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
-#include "event-panel.h"
+#include <ctype.h>
+
 #include "calendar.h"
+#include "event-panel.h"
 
 typedef struct {
 	GtkWidget* layout;
@@ -95,11 +97,28 @@ static void delete_clicked(GtkButton* button, gpointer user_data)
 static void save_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
+	// summary
 	icalcomponent_set_summary(ew->selected_event.v, gtk_entry_buffer_get_text(ew->event_label));
+	// description
 	GtkTextIter start, end;
 	gtk_text_buffer_get_start_iter(ew->description, &start);
 	gtk_text_buffer_get_end_iter(ew->description, &end);
 	icalcomponent_set_description(ew->selected_event.v, gtk_text_buffer_get_text(ew->description, &start, &end, FALSE));
+	// start time
+	icaltimetype dtstart = icalcomponent_get_dtstart(ew->selected_event.v);
+	int minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->starts_at));
+	dtstart.hour = minutes / 60;
+	dtstart.minute = minutes % 60;
+	icalcomponent_set_dtstart(ew->selected_event.v, dtstart);
+	// duration
+	// an icalcomponent may have DTEND or DURATION, but not both. focal prefers DTEND,
+	// but libical will error out if set_dtend is called when the event event already has
+	// a DURATION. So unconditionally remove any DURATION property before calling set_dtend.
+	icalcomponent_remove_property(ew->selected_event.v, icalcomponent_get_first_property(ew->selected_event.v, ICAL_DURATION_PROPERTY));
+	icaltimetype dtend = dtstart;
+	minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->duration));
+	icaltime_adjust(&dtend, 0, minutes / 60, minutes % 60, 0);
+	icalcomponent_set_dtend(ew->selected_event.v, dtend);
 	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_calendar, &ew->selected_event);
 }
 
@@ -111,6 +130,41 @@ static inline GtkWidget* field_label_new(const char* label)
 	return lbl;
 }
 
+static gboolean spin_time_on_output(GtkSpinButton* spin, gpointer data)
+{
+	int value = (int) gtk_adjustment_get_value(gtk_spin_button_get_adjustment(spin));
+	char* text = g_strdup_printf("%02d:%02d", value / 60, value % 60);
+	gtk_entry_set_text(GTK_ENTRY(spin), text);
+	free(text);
+	return TRUE;
+}
+
+gint spin_time_on_input(GtkSpinButton* spin_button, gpointer new_value, gpointer user_data)
+{
+	const gchar* text = gtk_entry_get_text(GTK_ENTRY(spin_button));
+	gint hours, minutes;
+	if (sscanf(text, "%d:%d", &hours, &minutes) == 2) {
+		*((gdouble*) new_value) = hours * 60 + minutes;
+		return TRUE;
+	}
+	return GTK_INPUT_ERROR;
+}
+
+void spin_insert_text(GtkEditable* editable, gchar* text, gint len, gpointer position, gpointer user_data)
+{
+	char *out, *in;
+	for (out = text, in = text; *in;) {
+		if (isdigit(*in) || *in == ':')
+			*out++ = *in++;
+		else
+			in++;
+	}
+	g_signal_handlers_block_by_func((GObject*) editable, (gpointer) &spin_insert_text, user_data);
+	gtk_editable_insert_text(editable, text, out - text, position);
+	g_signal_handlers_unblock_by_func((GObject*) editable, (gpointer) &spin_insert_text, user_data);
+	g_signal_stop_emission_by_name((GObject*) editable, "insert_text");
+}
+
 GtkWidget* event_panel_new()
 {
 	EventPanel* e = g_object_new(FOCAL_TYPE_EVENT_PANEL, "orientation", GTK_ORIENTATION_VERTICAL, NULL);
@@ -119,6 +173,7 @@ GtkWidget* event_panel_new()
 
 	e->event_label = gtk_entry_buffer_new("", 0);
 	GtkWidget* event_title = gtk_entry_new_with_buffer(e->event_label);
+	gtk_entry_set_has_frame(GTK_ENTRY(event_title), FALSE);
 	gtk_action_bar_set_center_widget(GTK_ACTION_BAR(bar), event_title);
 
 	e->delete_button = gtk_button_new();
@@ -136,9 +191,20 @@ GtkWidget* event_panel_new()
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 5);
 	gtk_grid_set_row_spacing(GTK_GRID(grid), 5);
 
-	e->starts_at = gtk_label_new("");
+	e->starts_at = gtk_spin_button_new_with_range(0, 24 * 60 - 1, 15);
+	gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(e->starts_at), FALSE);
+	g_object_set(e->starts_at, "width-chars", 5, "max-width-chars", 5, NULL);
+	g_signal_connect(e->starts_at, "output", (GCallback) &spin_time_on_output, NULL);
+	g_signal_connect(e->starts_at, "input", (GCallback) &spin_time_on_input, NULL);
+	g_signal_connect(e->starts_at, "insert-text", (GCallback) &spin_insert_text, NULL);
 	gtk_widget_set_halign(e->starts_at, GTK_ALIGN_START);
-	e->duration = gtk_label_new("");
+
+	e->duration = gtk_spin_button_new_with_range(0, 24 * 60 - 1, 15);
+	gtk_spin_button_set_numeric(GTK_SPIN_BUTTON(e->duration), FALSE);
+	g_object_set(e->duration, "width-chars", 5, "max-width-chars", 5, NULL);
+	g_signal_connect(e->duration, "output", (GCallback) &spin_time_on_output, NULL);
+	g_signal_connect(e->duration, "input", (GCallback) &spin_time_on_input, NULL);
+	g_signal_connect(e->duration, "insert-text", (GCallback) &spin_insert_text, NULL);
 	gtk_widget_set_halign(e->duration, GTK_ALIGN_START);
 
 	GtkWidget* description_scrolled = gtk_scrolled_window_new(0, 0);
@@ -151,8 +217,10 @@ GtkWidget* event_panel_new()
 	gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(description_view), GTK_WRAP_WORD);
 	e->description = gtk_text_view_get_buffer(GTK_TEXT_VIEW(description_view));
 
-	gtk_grid_attach(GTK_GRID(grid), e->starts_at, 0, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), e->duration, 1, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), gtk_label_new("@"), 0, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), e->starts_at, 1, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), gtk_label_new("for"), 2, 0, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), e->duration, 3, 0, 1, 1);
 
 	GtkWidget* attendees_scrolled = gtk_scrolled_window_new(0, 0);
 	// TODO: infer appropriate height somehow
@@ -164,9 +232,9 @@ GtkWidget* event_panel_new()
 	g_signal_connect(G_OBJECT(e->attendees.layout), "size-allocate", G_CALLBACK(attendee_layout_relayout), &e->attendees);
 	gtk_container_add(GTK_CONTAINER(attendees_scrolled), e->attendees.layout);
 
-	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 0, 1, 2, 1);
+	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 0, 1, 4, 1);
 
-	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 2, 2, 1);
+	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 2, 4, 1);
 
 	gtk_box_pack_start(GTK_BOX(e), bar, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(e), grid, TRUE, TRUE, 0);
@@ -177,24 +245,15 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ce)
 {
 	attendee_layout_clear(&ew->attendees);
 	if (cal && ce.v) {
-		char time_buf[64];
 		gtk_entry_buffer_set_text(ew->event_label, icalcomponent_get_summary(ce.v), -1);
 
 		// TODO: timezone conversion
 		icaltimetype dt = icalcomponent_get_dtstart(ce.v);
-		snprintf(time_buf, 6, "%02d:%02d", dt.hour, dt.minute);
-		gtk_label_set_label(GTK_LABEL(ew->starts_at), time_buf);
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(ew->starts_at), dt.minute + dt.hour * 60);
 
 		// TODO: handle very long events
 		struct icaldurationtype dur = icalcomponent_get_duration(ce.v);
-		if (dur.hours > 0) {
-			if (dur.minutes > 0)
-				snprintf(time_buf, 64, "%d hours %d minutes", dur.hours, dur.minutes);
-			else
-				snprintf(time_buf, 64, "%d hours", dur.hours);
-		} else
-			snprintf(time_buf, 64, "%d minutes", dur.minutes);
-		gtk_label_set_label(GTK_LABEL(ew->duration), time_buf);
+		gtk_spin_button_set_value(GTK_SPIN_BUTTON(ew->duration), dur.minutes + dur.hours * 60);
 
 		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), icalcomponent_get_description(ce.v), -1);
 		for (icalproperty* attendee = icalcomponent_get_first_property(ce.v, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ce.v, ICAL_ATTENDEE_PROPERTY)) {

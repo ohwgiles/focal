@@ -137,6 +137,7 @@ static void event_delete(EventPanel* event_panel, Calendar* cal, CalendarEvent* 
 static void event_save(EventPanel* event_panel, Calendar* cal, CalendarEvent* ce, FocalMain* focal)
 {
 	calendar_update_event(FOCAL_CALENDAR(cal), *ce);
+	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), *ce);
 }
 
 static void load_calendar_config(FocalMain* fm)
