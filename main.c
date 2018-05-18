@@ -187,6 +187,27 @@ static void load_calendar_config(FocalMain* fm)
 	g_strfreev(groups);
 }
 
+static void update_window_title(FocalMain* fm)
+{
+	int week_num = week_view_get_current_week(FOCAL_WEEK_VIEW(fm->weekView));
+	char week_title[8];
+	snprintf(week_title, 8, "Week %d", week_num);
+
+	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), week_title);
+}
+
+static void on_nav_previous(GtkButton* button, FocalMain* fm)
+{
+	week_view_previous(FOCAL_WEEK_VIEW(fm->weekView));
+	update_window_title(fm);
+}
+
+static void on_nav_next(GtkButton* button, FocalMain* fm)
+{
+	week_view_next(FOCAL_WEEK_VIEW(fm->weekView));
+	update_window_title(fm);
+}
+
 int main(int argc, char** argv)
 {
 	rpc_status_t rpc = rpc_init();
@@ -224,6 +245,17 @@ int main(int argc, char** argv)
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
+	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
+	GtkWidget *prev = gtk_button_new(), *next = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+	gtk_container_add(GTK_CONTAINER(nav), prev);
+	gtk_container_add(GTK_CONTAINER(nav), next);
+	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, &fm);
+	g_signal_connect(next, "clicked", (GCallback) &on_nav_next, &fm);
+
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), nav);
 	gtk_window_set_titlebar(GTK_WINDOW(fm.mainWindow), header);
 
 	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
@@ -234,12 +266,7 @@ int main(int argc, char** argv)
 
 	gtk_window_set_default_size(GTK_WINDOW(fm.mainWindow), 780, 630);
 
-	// create window title
-	int week_num = week_view_get_current_week(FOCAL_WEEK_VIEW(fm.weekView));
-	char week_title[8];
-	snprintf(week_title, 8, "Week %d", week_num);
-
-	gtk_window_set_title(GTK_WINDOW(fm.mainWindow), week_title);
+	update_window_title(&fm);
 
 	gtk_widget_show_all(fm.mainWindow);
 
