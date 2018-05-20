@@ -20,17 +20,17 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
 
-void calendar_add_event(Calendar* self, CalendarEvent event)
+void calendar_add_event(Calendar* self, icalcomponent* event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->add_event(self, event);
 }
 
-void calendar_update_event(Calendar* self, CalendarEvent event)
+void calendar_update_event(Calendar* self, icalcomponent* event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->update_event(self, event);
 }
 
-void calendar_delete_event(Calendar* self, CalendarEvent event)
+void calendar_delete_event(Calendar* self, icalcomponent* event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->delete_event(self, event);
 }

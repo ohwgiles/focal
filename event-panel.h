@@ -24,6 +24,6 @@ G_DECLARE_FINAL_TYPE(EventPanel, event_panel, FOCAL, EVENT_PANEL, GtkBox)
 
 GtkWidget* event_panel_new();
 
-void event_panel_set_event(EventPanel* ew, Calendar* cal, CalendarEvent ev);
+void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev);
 
 #endif //EVENT_PANEL_H

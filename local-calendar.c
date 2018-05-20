@@ -28,23 +28,23 @@ static void write_ical_to_disk(LocalCalendar* lc)
 	g_file_set_contents(lc->path, icalcomponent_as_ical_string(lc->ical), -1, NULL);
 }
 
-static void add_event(Calendar* c, CalendarEvent event)
+static void add_event(Calendar* c, icalcomponent* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
-	icalcomponent_add_component(lc->ical, event.v);
+	icalcomponent_add_component(lc->ical, event);
 	write_ical_to_disk(lc);
 }
 
-static void update_event(Calendar* c, CalendarEvent event)
+static void update_event(Calendar* c, icalcomponent* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
 	write_ical_to_disk(lc);
 }
 
-static void delete_event(Calendar* c, CalendarEvent event)
+static void delete_event(Calendar* c, icalcomponent* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
-	icalcomponent_remove_component(lc->ical, event.v);
+	icalcomponent_remove_component(lc->ical, event);
 	write_ical_to_disk(lc);
 }
 
@@ -52,19 +52,12 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
 	for (GSList* p = lc->events; p; p = p->next) {
-		if (p->data)
-			callback(user, (Calendar*) lc, *((CalendarEvent*) p->data));
+		callback(user, (Calendar*) lc, (icalcomponent*) p->data);
 	}
 }
 
 static void free_events(LocalCalendar* lc)
 {
-	for (GSList* p = lc->events; p; p = p->next) {
-		if (p->data) {
-			CalendarEvent* ce = (CalendarEvent*) p->data;
-			free(ce);
-		}
-	}
 	g_slist_free(lc->events);
 	icalcomponent_free(lc->ical);
 	lc->events = NULL;
@@ -100,10 +93,7 @@ void local_calendar_sync(LocalCalendar* lc)
 	g_free(contents);
 	lc->events = g_slist_alloc();
 	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); e; e = icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT)) {
-		CalendarEvent* ce = malloc(sizeof(CalendarEvent));
-		ce->v = e;
-		ce->priv = NULL;
-		lc->events = g_slist_append(lc->events, ce);
+		lc->events = g_slist_append(lc->events, e);
 	}
 }
 

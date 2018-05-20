@@ -20,26 +20,21 @@
 #define TYPE_CALENDAR (calendar_get_type())
 G_DECLARE_DERIVABLE_TYPE(Calendar, calendar, FOCAL, CALENDAR, GObject)
 
-typedef struct {
-	icalcomponent* v;
-	gpointer priv; // for use by child types
-} CalendarEvent;
-
-typedef void (*CalendarEachEventCallback)(void* user, Calendar*, CalendarEvent);
+typedef void (*CalendarEachEventCallback)(void* user, Calendar*, icalcomponent*);
 
 struct _CalendarClass {
 	GObjectClass parent;
-	void (*add_event)(Calendar*, CalendarEvent event);
-	void (*update_event)(Calendar*, CalendarEvent event);
-	void (*delete_event)(Calendar*, CalendarEvent event);
+	void (*add_event)(Calendar*, icalcomponent* event);
+	void (*update_event)(Calendar*, icalcomponent* event);
+	void (*delete_event)(Calendar*, icalcomponent* event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
 };
 
-void calendar_add_event(Calendar* self, CalendarEvent event);
+void calendar_add_event(Calendar* self, icalcomponent* event);
 
-void calendar_update_event(Calendar* self, CalendarEvent event);
+void calendar_update_event(Calendar* self, icalcomponent* event);
 
-void calendar_delete_event(Calendar* self, CalendarEvent event);
+void calendar_delete_event(Calendar* self, icalcomponent* event);
 
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
 

@@ -17,6 +17,7 @@
 
 #include "caldav-client.h"
 #include "calendar.h"
+#include "event-private.h"
 
 struct _CaldavClient {
 	char* url;
@@ -149,10 +150,9 @@ static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 		icalcomponent* vevent = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
 
 		if (vevent) {
-			CalendarEvent* ce = malloc(sizeof(CalendarEvent));
-			ce->v = vevent;
-			ce->priv = g_strdup(xpc->current_href);
-			xpc->event_list = g_slist_append(xpc->event_list, ce);
+			EventPrivate* fp = icalcomponent_create_private(vevent);
+			fp->url = g_strdup(xpc->current_href);
+			xpc->event_list = g_slist_append(xpc->event_list, vevent);
 		}
 	}
 

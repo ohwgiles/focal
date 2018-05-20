@@ -13,6 +13,7 @@
  */
 #include "remote-calendar.h"
 #include "caldav-client.h"
+#include "event-private.h"
 
 struct _RemoteCalendar {
 	Calendar parent;
@@ -21,22 +22,24 @@ struct _RemoteCalendar {
 };
 G_DEFINE_TYPE(RemoteCalendar, remote_calendar, TYPE_CALENDAR)
 
-static void add_event(Calendar* c, CalendarEvent event)
+static void add_event(Calendar* c, icalcomponent* event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
-	caldav_client_put(rc->caldav, event.v, NULL);
+	caldav_client_put(rc->caldav, event, NULL);
 }
 
-static void update_event(Calendar* c, CalendarEvent event)
+static void update_event(Calendar* c, icalcomponent* event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
-	caldav_client_put(rc->caldav, event.v, event.priv);
+	EventPrivate* priv = icalcomponent_get_private(event);
+	caldav_client_put(rc->caldav, event, priv->url);
 }
 
-static void delete_event(Calendar* c, CalendarEvent event)
+static void delete_event(Calendar* c, icalcomponent* event)
 {
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
-	caldav_client_delete(rc->caldav, event.v, event.priv);
+	EventPrivate* priv = icalcomponent_get_private(event);
+	caldav_client_delete(rc->caldav, event, priv->url);
 }
 
 static void each_event(Calendar* c, CalendarEachEventCallback callback, void* user)
@@ -44,7 +47,7 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(c);
 	for (GSList* p = rc->events; p; p = p->next) {
 		if (p->data)
-			callback(user, (Calendar*) rc, *((CalendarEvent*) p->data));
+			callback(user, (Calendar*) rc, (icalcomponent*) p->data);
 	}
 }
 
@@ -52,10 +55,11 @@ static void free_events(RemoteCalendar* rc)
 {
 	for (GSList* p = rc->events; p; p = p->next) {
 		if (p->data) {
-			CalendarEvent* ce = (CalendarEvent*) p->data;
-			icalcomponent_free(icalcomponent_get_parent(ce->v));
-			free(ce->priv);
-			free(ce);
+			icalcomponent* ev = (icalcomponent*) p->data;
+			free(icalcomponent_get_private(ev)->url);
+			icalcomponent_free_private(ev);
+			icalcomponent_free(icalcomponent_get_parent(ev));
+			free(ev);
 		}
 	}
 	g_slist_free(rc->events);

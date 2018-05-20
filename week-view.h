@@ -23,12 +23,12 @@ G_DECLARE_FINAL_TYPE(WeekView, week_view, FOCAL, WEEK_VIEW, GtkDrawingArea)
 
 GtkWidget* week_view_new(void);
 
-void week_view_add_event(WeekView* wv, Calendar* cal, CalendarEvent vevent);
-void week_view_remove_event(WeekView* wv, CalendarEvent vevent);
+void week_view_add_event(WeekView* wv, Calendar* cal, icalcomponent* vevent);
+void week_view_remove_event(WeekView* wv, icalcomponent* vevent);
 void week_view_add_calendar(WeekView* widget, Calendar* cal);
 int week_view_get_current_week(WeekView* wv);
 void week_view_previous(WeekView* wv);
 void week_view_next(WeekView* wv);
-void week_view_refresh(WeekView* wv, CalendarEvent ce);
+void week_view_refresh(WeekView* wv, icalcomponent* ev);
 
 #endif // WEEK_VIEW_H

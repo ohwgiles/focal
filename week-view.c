@@ -19,7 +19,7 @@
 #include "week-view.h"
 
 struct _EventWidget {
-	CalendarEvent ev;
+	icalcomponent* ev;
 	// associated calendar
 	Calendar* cal;
 	// cached time values for faster drawing
@@ -150,7 +150,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 			cairo_set_source_rgb(cr, 1, 1, 1);
 			cairo_move_to(cr, x + 5, yfrom + 15);
-			cairo_show_text(cr, icalcomponent_get_summary(tmp->ev.v));
+			cairo_show_text(cr, icalcomponent_get_summary(tmp->ev));
 		}
 	}
 
@@ -195,7 +195,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			rect.x = dow * rect.width + SIDEBAR_WIDTH;
 			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, &tmp->ev, &rect);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, tmp->ev, &rect);
 		} else
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL, NULL);
 	}
@@ -349,19 +349,19 @@ static void event_widget_set_extents(EventWidget* w, icaltimetype start, struct 
 	w->minutes_to = (start.hour + dur.hours) * 60 + start.minute + dur.minutes;
 }
 
-static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarEvent ce)
+static void add_event_from_calendar(gpointer user_data, Calendar* cal, icalcomponent* ev)
 {
 	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
-	icaltimetype dtstart = icalcomponent_get_dtstart(ce.v);
-	icaltimetype dtend = icalcomponent_get_dtend(ce.v);
+	icaltimetype dtstart = icalcomponent_get_dtstart(ev);
+	icaltimetype dtend = icalcomponent_get_dtend(ev);
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, cw->current_tz);
 	icaltimezone_convert_time(&dtend, (icaltimezone*) tz, cw->current_tz);
 
-	struct icaldurationtype duration = icalcomponent_get_duration(ce.v);
+	struct icaldurationtype duration = icalcomponent_get_duration(ev);
 
-	icalproperty* rrule = icalcomponent_get_first_property(ce.v, ICAL_RRULE_PROPERTY);
+	icalproperty* rrule = icalcomponent_get_first_property(ev, ICAL_RRULE_PROPERTY);
 	if (rrule) {
 		// recurring event
 		struct icalrecurrencetype recur = icalproperty_get_rrule(rrule);
@@ -380,7 +380,7 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarE
 			if (icaltime_span_overlaps(&span, &cw->current_view)) {
 				int dow = icaltime_day_of_week(next) - 1;
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-				w->ev = ce;
+				w->ev = ev;
 				w->cal = cal;
 				event_widget_set_extents(w, next, duration);
 				w->next = cw->events_week[dow];
@@ -394,7 +394,7 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarE
 			if (icaltime_span_overlaps(&span, &cw->current_view)) {
 				int dow = icaltime_day_of_week(dtstart) - 1;
 				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-				w->ev = ce;
+				w->ev = ev;
 				w->cal = cal;
 				event_widget_set_extents(w, dtstart, duration);
 				w->next = cw->events_week[dow];
@@ -404,21 +404,21 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, CalendarE
 	}
 }
 
-void week_view_add_event(WeekView* wv, Calendar* cal, CalendarEvent vevent)
+void week_view_add_event(WeekView* wv, Calendar* cal, icalcomponent* vevent)
 {
 	add_event_from_calendar(wv, cal, vevent);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-void week_view_remove_event(WeekView* wv, CalendarEvent ce)
+void week_view_remove_event(WeekView* wv, icalcomponent* ev)
 {
-	icaltimetype dtstart = icalcomponent_get_dtstart(ce.v);
+	icaltimetype dtstart = icalcomponent_get_dtstart(ev);
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
 	int dow = icaltime_day_of_week(dtstart) - 1;
 	for (EventWidget** ew = &wv->events_week[dow]; *ew; ew = &(*ew)->next) {
-		if (memcmp(&(*ew)->ev, &ce, sizeof(CalendarEvent)) == 0) {
+		if ((*ew)->ev == ev) {
 			EventWidget* next = (*ew)->next;
 			free(*ew);
 			*ew = next;
@@ -488,17 +488,17 @@ void week_view_next(WeekView* wv)
 	week_view_populate_view(wv);
 }
 
-void week_view_refresh(WeekView* wv, CalendarEvent ce)
+void week_view_refresh(WeekView* wv, icalcomponent* ev)
 {
 	// find corresponding EventWidget(s), there may be many if it's a recurring event
 	for (int i = 0; i < 7; ++i) {
 		for (EventWidget** ew = &wv->events_week[i]; *ew; ew = &(*ew)->next) {
-			if (memcmp(&(*ew)->ev, &ce, sizeof(CalendarEvent)) == 0) {
+			if ((*ew)->ev == ev) {
 				// although dtstart may refer to a completely different day in the case
 				// of a recurring event, here we assume the hour/minute is consistent and
 				// so no need to go through all the recurrence rules again
-				icaltimetype dtstart = icalcomponent_get_dtstart(ce.v);
-				struct icaldurationtype duration = icalcomponent_get_duration(ce.v);
+				icaltimetype dtstart = icalcomponent_get_dtstart(ev);
+				struct icaldurationtype duration = icalcomponent_get_duration(ev);
 				event_widget_set_extents(*ew, dtstart, duration);
 			}
 		}
