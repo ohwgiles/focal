@@ -247,8 +247,40 @@ gboolean caldav_client_init(CaldavClient* cc)
 	return TRUE;
 }
 
-gboolean caldav_client_put(CaldavClient* cc, icalcomponent* event, const char* url)
+gboolean caldav_client_put_new(CaldavClient* cc, icalcomponent* event, const char* url)
 {
+	g_assert_nonnull(url);
+	CURL* curl = curl_easy_init();
+	if (!curl)
+		return FALSE;
+
+	struct curl_slist* headers = NULL;
+	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
+	headers = curl_slist_append(headers, "Expect:");
+	headers = curl_slist_append(headers, "If-None-Match: *");
+
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
+
+	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
+
+	CURLcode res = curl_easy_perform(curl);
+
+	free(caldata);
+	curl_easy_cleanup(curl);
+
+	return res == CURLE_OK;
+}
+
+gboolean caldav_client_put_update(CaldavClient* cc, icalcomponent* event, const char* url)
+{
+	g_assert_nonnull(url);
 	CURL* curl = curl_easy_init();
 	if (!curl)
 		return FALSE;
@@ -258,13 +290,8 @@ gboolean caldav_client_put(CaldavClient* cc, icalcomponent* event, const char* u
 	headers = curl_slist_append(headers, "Expect:");
 
 	char* purl;
-	if (url) {
-		char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
-		asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
-	} else {
-		asprintf(&purl, "%s/%s.ics", cc->url, icalcomponent_get_uid(event));
-		headers = curl_slist_append(headers, "If-None-Match: *");
-	}
+	char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
+	asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
 
 	curl_easy_setopt(curl, CURLOPT_URL, purl);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
@@ -358,7 +385,6 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	XmlParseCtx ctx;
 	xmlctx_init(&ctx);
 	// list containing all <href> URLs
-	ctx.hrefs = g_slist_alloc();
 	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
 								.startElement = xmlparse_tag_open,
 								.endElement = xmlparse_find_hrefs};
@@ -394,7 +420,6 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	}
 
 	xmlctx_init(&ctx);
-	ctx.event_list = g_slist_alloc();
 	xmlSAXHandler my_handler2 = {.characters = xmlparse_characters,
 								 .startElement = xmlparse_tag_open,
 								 .endElement = xmlparse_find_caldata};

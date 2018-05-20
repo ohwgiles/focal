@@ -21,10 +21,15 @@
 
 #include <libical/ical.h>
 
+typedef struct _Calendar Calendar;
+
 typedef struct {
 	/* Focal application fields defined here */
+	Calendar* cal;
 	char* url;
 } EventPrivate;
+
+gboolean icalcomponent_has_private(icalcomponent* cmp);
 
 EventPrivate* icalcomponent_get_private(icalcomponent* cmp);
 

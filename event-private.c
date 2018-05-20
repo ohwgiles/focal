@@ -30,6 +30,12 @@ typedef struct {
 /* Should not conflict with pre-existing types in icalproperty_kind */
 #define ICAL_FOCAL_PRIV_PROPERTY ((icalproperty_kind) 174)
 
+gboolean icalcomponent_has_private(icalcomponent* cmp)
+{
+	icalproperty_compat* prop = (icalproperty_compat*) icalcomponent_get_first_property(cmp, ICAL_FOCAL_PRIV_PROPERTY);
+	return prop != NULL;
+}
+
 EventPrivate* icalcomponent_get_private(icalcomponent* cmp)
 {
 	icalproperty_compat* prop = (icalproperty_compat*) icalcomponent_get_first_property(cmp, ICAL_FOCAL_PRIV_PROPERTY);

@@ -196,8 +196,32 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, tmp->ev, &rect);
-		} else
+		} else if (event->type == GDK_2BUTTON_PRESS) {
+			// double-click: request to create an event
+			// dtstart: round down to closest quarter-hour
+			time_t at = wv->current_view.start + dow * 24 * 3600 + 15 * (minutesAt / 15) * 60;
+			icaltimetype dtstart = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
+			dtstart.zone = wv->current_tz;
+			icaltimetype dtend = dtstart;
+			// duration: default event is 30min long
+			icaltime_adjust(&dtend, 0, 0, 30, 0);
+			icalcomponent* ev = icalcomponent_new_vevent();
+			icalcomponent_set_dtstart(ev, dtstart);
+			icalcomponent_set_dtend(ev, dtend);
+			icalcomponent_set_summary(ev, "New Event");
+
+			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+			rect.x = dow * rect.width + SIDEBAR_WIDTH;
+			rect.y = HEADER_HEIGHT + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+			rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
+
+			week_view_add_event(wv, wv->calendars->data, ev);
+			gtk_widget_queue_draw((GtkWidget*) wv);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, wv->calendars->data, ev, &rect);
+		} else {
+			// deselect
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL, NULL);
+		}
 	}
 	return TRUE;
 }

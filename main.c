@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "event-panel.h"
+#include "event-private.h"
 #include "local-calendar.h"
 #include "remote-calendar.h"
 #include "rpc.h"
@@ -135,7 +136,13 @@ static void event_delete(EventPanel* event_panel, Calendar* cal, icalcomponent* 
 
 static void event_save(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
 {
-	calendar_update_event(FOCAL_CALENDAR(cal), ev);
+	if (icalcomponent_has_private(ev)) {
+		calendar_update_event(FOCAL_CALENDAR(cal), ev);
+	} else {
+		calendar_add_event(FOCAL_CALENDAR(cal), ev);
+	}
+	// needed in case the time, duration or summary changed
+	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
@@ -222,6 +229,9 @@ int main(int argc, char** argv)
 	}
 
 	gtk_init(&argc, &argv);
+
+	// needed to generate unique uuids for new events
+	srand(time(NULL) * getpid());
 
 	FocalMain fm = {0};
 	fm.mainWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);

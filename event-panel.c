@@ -65,7 +65,7 @@ struct _EventPanel {
 	GtkTextBuffer* description;
 	AttendeeLayout attendees;
 
-	Calendar* selected_calendar;
+	Calendar* selected_event_calendar;
 	icalcomponent* selected_event;
 };
 G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_BOX)
@@ -91,7 +91,7 @@ static void event_panel_init(EventPanel* self)
 static void delete_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->target_calendar, ew->selected_event);
+	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_event_calendar, ew->selected_event);
 }
 
 static void save_clicked(GtkButton* button, gpointer user_data)
@@ -119,7 +119,7 @@ static void save_clicked(GtkButton* button, gpointer user_data)
 	minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->duration));
 	icaltime_adjust(&dtend, 0, minutes / 60, minutes % 60, 0);
 	icalcomponent_set_dtend(ew->selected_event, dtend);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_calendar, ew->selected_event);
+	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event_calendar, ew->selected_event);
 }
 
 static inline GtkWidget* field_label_new(const char* label)
@@ -244,7 +244,7 @@ GtkWidget* event_panel_new()
 void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 {
 	attendee_layout_clear(&ew->attendees);
-	if (cal && ev) {
+	if (ev) {
 		gtk_entry_buffer_set_text(ew->event_label, icalcomponent_get_summary(ev), -1);
 
 		// TODO: timezone conversion
@@ -265,10 +265,7 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 			gtk_widget_get_allocation(ew->attendees.layout, &alloc);
 			attendee_layout_relayout(ew->attendees.layout, &alloc, &ew->attendees);
 		}
-		ew->selected_calendar = cal;
-		ew->selected_event = ev;
-	} else {
-		ew->selected_calendar = NULL;
-		ew->selected_event = NULL;
 	}
+	ew->selected_event = ev;
+	ew->selected_event_calendar = cal;
 }

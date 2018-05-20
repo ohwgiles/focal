@@ -24,7 +24,9 @@ CaldavClient* caldav_client_new(const char* url, const char* user, const char* p
 
 gboolean caldav_client_init(CaldavClient*);
 
-gboolean caldav_client_put(CaldavClient*, icalcomponent* event, const char* url);
+gboolean caldav_client_put_new(CaldavClient*, icalcomponent* event, const char* url);
+
+gboolean caldav_client_put_update(CaldavClient*, icalcomponent* event, const char* url);
 
 gboolean caldav_client_delete(CaldavClient*, icalcomponent* event, const char* url);
 

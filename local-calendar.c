@@ -31,6 +31,7 @@ static void write_ical_to_disk(LocalCalendar* lc)
 static void add_event(Calendar* c, icalcomponent* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
+
 	icalcomponent_add_component(lc->ical, event);
 	write_ical_to_disk(lc);
 }
@@ -91,7 +92,7 @@ void local_calendar_sync(LocalCalendar* lc)
 
 	lc->ical = icalcomponent_new_from_string(contents);
 	g_free(contents);
-	lc->events = g_slist_alloc();
+	lc->events = NULL;
 	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); e; e = icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT)) {
 		lc->events = g_slist_append(lc->events, e);
 	}
