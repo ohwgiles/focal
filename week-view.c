@@ -342,6 +342,7 @@ void update_view_span(WeekView* wv)
 	start.hour = 0;
 	start.minute = 0;
 	start.second = 0;
+	start.is_date = FALSE;
 	start.zone = wv->current_tz;
 	icaltimetype until = start;
 	icaltime_adjust(&until, 7, 0, 0, 0);
