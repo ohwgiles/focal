@@ -123,16 +123,6 @@ static void xmlparse_init_close(void* ctx, const xmlChar* name)
 	xmlparse_ns_pop(xpc);
 }
 
-// Callback when SAX parser finds a closing XML tag during search for hrefs
-static void xmlparse_find_hrefs(void* ctx, const xmlChar* name)
-{
-	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
-	if (xml_tag_matches(xpc, name, "DAV:", "href")) {
-		xpc->hrefs = g_slist_append(xpc->hrefs, g_strdup(xpc->chars.str));
-	}
-	xmlparse_ns_pop(xpc);
-}
-
 // Callback when SAX parser finds a closing XML tag during calendar-data REPORT
 static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 {
@@ -357,7 +347,7 @@ GSList* caldav_client_sync(CaldavClient* cc)
 		return NULL;
 
 	curl_easy_setopt(curl, CURLOPT_URL, cc->url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PROPFIND");
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
 	struct curl_slist* headers = NULL;
 	headers = curl_slist_append(headers, "Depth: 1");
 	headers = curl_slist_append(headers, "Prefer: return-minimal");
@@ -367,63 +357,36 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
 	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, "<propfind xmlns=\"DAV:\"><prop><href/></prop></propfind>");
-
-	GString* propfind_resp = g_string_new(NULL);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, propfind_resp);
-
-	// First, a PROPFIND request...
-	ret = curl_easy_perform(curl);
-
-	if (ret != CURLE_OK) {
-		g_string_free(propfind_resp, TRUE);
-		curl_easy_cleanup(curl);
-		return NULL;
-	}
-
-	XmlParseCtx ctx;
-	xmlctx_init(&ctx);
-	// list containing all <href> URLs
-	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
-								.startElement = xmlparse_tag_open,
-								.endElement = xmlparse_find_hrefs};
-	xmlSAXUserParseMemory(&my_handler, &ctx, propfind_resp->str, propfind_resp->len);
-	xmlctx_cleanup(&ctx);
-	g_string_free(propfind_resp, TRUE);
 
 	GString* report_req = g_string_new(
-		"<c:calendar-multiget xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+		"<d:sync-collection xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+		"  <d:sync-token></d:sync-token>"
+		"  <d:sync-level>1</d:sync-level>"
 		"  <d:prop>"
-		"    <d:getetag/>"
 		"    <c:calendar-data/>"
-		"  </d:prop>");
-	for (GSList* p = ctx.hrefs; p; p = p->next) {
-		g_string_append_printf(report_req, "<d:href>%s</d:href>", (char*) p->data);
-	}
-	g_string_append(report_req, "</c:calendar-multiget>");
-	g_slist_free_full(ctx.hrefs, g_free);
-
-	// ... and then REPORT, reusing the same CURL*
-	GString* report_resp = g_string_new(NULL);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
+		"    <d:getetag/>"
+		"  </d:prop>"
+		"</d:sync-collection>");
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, report_req->str);
+
+	GString* report_resp = g_string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, report_resp);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
 
 	ret = curl_easy_perform(curl);
-	curl_easy_cleanup(curl);
 	g_string_free(report_req, TRUE);
-
+	curl_easy_cleanup(curl);
 	if (ret != CURLE_OK) {
 		g_string_free(report_resp, TRUE);
 		return NULL;
 	}
 
+	XmlParseCtx ctx;
 	xmlctx_init(&ctx);
-	xmlSAXHandler my_handler2 = {.characters = xmlparse_characters,
-								 .startElement = xmlparse_tag_open,
-								 .endElement = xmlparse_find_caldata};
-	xmlSAXUserParseMemory(&my_handler2, &ctx, report_resp->str, report_resp->len);
+	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
+								.startElement = xmlparse_tag_open,
+								.endElement = xmlparse_find_caldata};
+	xmlSAXUserParseMemory(&my_handler, &ctx, report_resp->str, report_resp->len);
 	xmlctx_cleanup(&ctx);
 	g_string_free(report_resp, TRUE);
 
