@@ -55,7 +55,7 @@ static void add_event(Calendar* c, icalcomponent* event)
 	}
 
 	char* url;
-	asprintf(&url, "%s%s.ics", rc->url, icalcomponent_get_uid(event));
+	asprintf(&url, "%s/%s.ics", rc->url, icalcomponent_get_uid(event));
 	priv->url = url;
 	priv->cal = c;
 
