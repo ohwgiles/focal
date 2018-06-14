@@ -231,8 +231,8 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
 	GtkWidget *prev = gtk_button_new(), *next = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
+	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_MENU));
+	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_container_add(GTK_CONTAINER(nav), prev);
 	gtk_container_add(GTK_CONTAINER(nav), next);
 	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, fm);
