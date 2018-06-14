@@ -15,6 +15,7 @@
 
 typedef struct {
 	char* name;
+	char* email;
 	GdkRGBA color;
 } CalendarPrivate;
 
@@ -40,8 +41,16 @@ void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, voi
 	FOCAL_CALENDAR_GET_CLASS(self)->each_event(self, callback, user);
 }
 
+static void finalize(GObject* gobject)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(FOCAL_CALENDAR(gobject));
+	g_free(priv->name);
+	g_free(priv->email);
+}
+
 void calendar_class_init(CalendarClass* klass)
 {
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 void calendar_init(Calendar* self)
@@ -60,12 +69,15 @@ void calendar_set_name(Calendar* self, const char* name)
 
 void calendar_set_email(Calendar* self, const char* email)
 {
-	g_object_set_data((GObject*) self, "email", g_strdup(email));
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	g_free(priv->email);
+	priv->email = g_strdup(email);
 }
 
 const char* calendar_get_email(Calendar* self)
 {
-	return g_object_get_data((GObject*) self, "email");
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return priv->email;
 }
 
 GdkRGBA* calendar_get_color(Calendar* self)

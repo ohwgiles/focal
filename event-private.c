@@ -55,5 +55,6 @@ void icalcomponent_free_private(icalcomponent* cmp)
 {
 	icalproperty_compat* prop = (icalproperty_compat*) icalcomponent_get_first_property(cmp, ICAL_FOCAL_PRIV_PROPERTY);
 	g_assert_nonnull(prop);
+	icalcomponent_remove_property(cmp, (icalproperty*) prop);
 	free(prop);
 }

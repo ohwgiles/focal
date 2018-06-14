@@ -35,7 +35,6 @@ add_executable(${PROJECT_NAME}
 	local-calendar.c
 	main.c
 	remote-calendar.c
-	rpc.c
 	week-view.c
 )
 

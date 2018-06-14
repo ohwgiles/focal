@@ -269,18 +269,41 @@ static void get_property(GObject* object, guint prop_id, GValue* value, GParamSp
 	}
 }
 
+static void week_view_dispose(GObject* gobject)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(gobject);
+	g_clear_object(&wv->adj);
+}
+
+static void week_view_finalize(GObject* gobject)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(gobject);
+	icaltimezone_free(wv->current_tz, TRUE);
+	g_slist_free(wv->calendars);
+	for (int i = 0; i < 7; ++i) {
+		EventWidget* ew = wv->events_week[i];
+		while (ew) {
+			EventWidget* next = ew->next;
+			free(ew);
+			ew = next;
+		}
+	}
+}
+
 static void week_view_class_init(WeekViewClass* klass)
 {
 	GObjectClass* goc = (GObjectClass*) klass;
 
-	((GObjectClass*) goc)->set_property = set_property;
-	((GObjectClass*) goc)->get_property = get_property;
-	g_object_class_override_property((GObjectClass*) goc, PROP_HADJUSTMENT, "hadjustment");
-	g_object_class_override_property((GObjectClass*) goc, PROP_VADJUSTMENT, "vadjustment");
-	g_object_class_override_property((GObjectClass*) goc, PROP_HSCROLL_POLICY, "hscroll-policy");
-	g_object_class_override_property((GObjectClass*) goc, PROP_VSCROLL_POLICY, "vscroll-policy");
+	goc->set_property = set_property;
+	goc->get_property = get_property;
+	goc->dispose = week_view_dispose;
+	goc->finalize = week_view_finalize;
+	g_object_class_override_property(goc, PROP_HADJUSTMENT, "hadjustment");
+	g_object_class_override_property(goc, PROP_VADJUSTMENT, "vadjustment");
+	g_object_class_override_property(goc, PROP_HSCROLL_POLICY, "hscroll-policy");
+	g_object_class_override_property(goc, PROP_VSCROLL_POLICY, "vscroll-policy");
 
-	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS((GObjectClass*) goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
+	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
@@ -412,6 +435,7 @@ static void add_event_from_calendar(gpointer user_data, Calendar* cal, icalcompo
 				cw->events_week[dow] = w;
 			}
 		}
+		icalrecur_iterator_free(ritr);
 	} else {
 		// non-recurring event
 		if (dtstart.year == cw->current_year) {

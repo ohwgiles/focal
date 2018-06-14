@@ -218,6 +218,7 @@ gboolean caldav_client_init(CaldavClient* cc)
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, init_resp);
 
 	ret = curl_easy_perform(curl);
+	curl_slist_free_all(headers);
 	curl_easy_cleanup(curl);
 
 	if (ret != CURLE_OK) {
@@ -261,6 +262,7 @@ gboolean caldav_client_put_new(CaldavClient* cc, icalcomponent* event, const cha
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
 
 	CURLcode res = curl_easy_perform(curl);
+	curl_slist_free_all(headers);
 
 	free(caldata);
 	curl_easy_cleanup(curl);
@@ -295,6 +297,7 @@ gboolean caldav_client_put_update(CaldavClient* cc, icalcomponent* event, const 
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
 
 	CURLcode res = curl_easy_perform(curl);
+	curl_slist_free_all(headers);
 
 	free(caldata);
 	free(purl);
@@ -331,6 +334,7 @@ gboolean caldav_client_delete(CaldavClient* cc, icalcomponent* event, const char
 	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
 
 	CURLcode res = curl_easy_perform(curl);
+	curl_slist_free_all(headers);
 
 	free(purl);
 	curl_easy_cleanup(curl);
@@ -374,6 +378,7 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
 
 	ret = curl_easy_perform(curl);
+	curl_slist_free_all(headers);
 	g_string_free(report_req, TRUE);
 	curl_easy_cleanup(curl);
 	if (ret != CURLE_OK) {

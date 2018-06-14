@@ -65,6 +65,14 @@ static void free_events(LocalCalendar* lc)
 	lc->ical = NULL;
 }
 
+static void finalize(GObject* gobject)
+{
+	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(gobject);
+	free_events(lc);
+	g_free(lc->path);
+	G_OBJECT_CLASS(local_calendar_parent_class)->finalize(gobject);
+}
+
 void local_calendar_init(LocalCalendar* lc)
 {
 }
@@ -75,6 +83,7 @@ void local_calendar_class_init(LocalCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 void local_calendar_sync(LocalCalendar* lc)

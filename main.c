@@ -15,7 +15,6 @@
 #include "event-private.h"
 #include "local-calendar.h"
 #include "remote-calendar.h"
-#include "rpc.h"
 #include "week-view.h"
 
 #include <curl/curl.h>
@@ -107,17 +106,6 @@ static void focal_add_event(FocalMain* focal, icalcomponent* ev)
 	gtk_widget_destroy(dialog);
 }
 
-static void rpc_handle_cmd(const char* cmd, void* data)
-{
-	icalcomponent* c = icalcomponent_from_file(cmd);
-	if (c) {
-		icalcomponent* vev = icalcomponent_get_first_real_component(c);
-		if (vev) {
-			focal_add_event(data, vev);
-		}
-	}
-}
-
 static void cal_event_selected(WeekView* widget, Calendar* cal, icalcomponent* ev, GdkRectangle* rect, FocalMain* fm)
 {
 	if (ev) {
@@ -163,6 +151,7 @@ static void load_calendar_config(FocalMain* fm)
 
 	g_key_file_load_from_file(config, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
 	groups = g_key_file_get_groups(config, &num_cals);
+	free(config_file);
 
 	for (int i = 0; i < num_cals; ++i) {
 		Calendar* cal;
@@ -174,23 +163,29 @@ static void load_calendar_config(FocalMain* fm)
 
 			cal = remote_calendar_new(url, user, pass);
 			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
+			g_free(url);
+			g_free(user);
+			g_free(pass);
 		} else if (g_strcmp0(type, "file") == 0) {
 			gchar* path = g_key_file_get_string(config, groups[i], "path", NULL);
 
 			cal = local_calendar_new(path);
 			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
+			g_free(path);
 		} else {
 			return (void) fprintf(stderr, "Unknown calendar type `%s'\n", type);
 		}
+		g_free(type);
 
 		calendar_set_name(cal, groups[i]);
-		calendar_set_email(cal, g_key_file_get_string(config, groups[i], "email", NULL));
+		char* email = g_key_file_get_string(config, groups[i], "email", NULL);
+		calendar_set_email(cal, email);
+		g_free(email);
 
 		fm->calendars = g_slist_append(fm->calendars, cal);
-
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 	}
 	g_strfreev(groups);
+	g_key_file_free(config);
 }
 
 static void update_window_title(FocalMain* fm)
@@ -214,43 +209,22 @@ static void on_nav_next(GtkButton* button, FocalMain* fm)
 	update_window_title(fm);
 }
 
-int main(int argc, char** argv)
+static void focal_create_main_window(GApplication* app, FocalMain* fm)
 {
-	rpc_status_t rpc = rpc_init();
-	if (rpc == RPC_BIND_ERROR) {
-		return 1;
-	} else if (rpc == RPC_BIND_INUSE) {
-		rpc_connect();
-		for (int i = 1; i < argc; ++i) {
-			// todo realpath
-			rpc_send_command(argv[i]);
-		}
-		return 0;
-	}
+	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
+	fm->weekView = week_view_new();
+	fm->eventDetail = event_panel_new();
 
-	gtk_init(&argc, &argv);
+	fm->popover = gtk_popover_new(fm->weekView);
+	gtk_popover_set_position(GTK_POPOVER(fm->popover), GTK_POS_RIGHT);
+	gtk_container_add(GTK_CONTAINER(fm->popover), fm->eventDetail);
+	gtk_widget_show_all(fm->eventDetail);
 
-	// needed to generate unique uuids for new events
-	srand(time(NULL) * getpid());
+	gtk_window_set_type_hint((GtkWindow*) fm->mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
-	FocalMain fm = {0};
-	fm.mainWindow = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-	fm.weekView = week_view_new();
-	fm.eventDetail = event_panel_new();
-	load_calendar_config(&fm);
-
-	fm.popover = gtk_popover_new(fm.weekView);
-	gtk_popover_set_position(GTK_POPOVER(fm.popover), GTK_POS_RIGHT);
-	gtk_container_add(GTK_CONTAINER(fm.popover), fm.eventDetail);
-	gtk_widget_show_all(fm.eventDetail);
-
-	rpc_server(&rpc_handle_cmd, &fm);
-
-	gtk_window_set_type_hint((GtkWindow*) fm.mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
-
-	g_signal_connect(fm.weekView, "event-selected", (GCallback) &cal_event_selected, &fm);
-	g_signal_connect(fm.eventDetail, "cal-event-delete", (GCallback) &event_delete, &fm);
-	g_signal_connect(fm.eventDetail, "cal-event-save", (GCallback) &event_save, &fm);
+	g_signal_connect(fm->weekView, "event-selected", (GCallback) &cal_event_selected, fm);
+	g_signal_connect(fm->eventDetail, "cal-event-delete", (GCallback) &event_delete, fm);
+	g_signal_connect(fm->eventDetail, "cal-event-save", (GCallback) &event_save, fm);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
@@ -261,27 +235,73 @@ int main(int argc, char** argv)
 	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_LARGE_TOOLBAR));
 	gtk_container_add(GTK_CONTAINER(nav), prev);
 	gtk_container_add(GTK_CONTAINER(nav), next);
-	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, &fm);
-	g_signal_connect(next, "clicked", (GCallback) &on_nav_next, &fm);
+	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, fm);
+	g_signal_connect(next, "clicked", (GCallback) &on_nav_next, fm);
 
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), nav);
-	gtk_window_set_titlebar(GTK_WINDOW(fm.mainWindow), header);
+	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), header);
 
 	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
-	gtk_container_add(GTK_CONTAINER(sw), fm.weekView);
-	gtk_container_add(GTK_CONTAINER(fm.mainWindow), sw);
+	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
+	gtk_container_add(GTK_CONTAINER(fm->mainWindow), sw);
 
-	g_signal_connect(fm.mainWindow, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+	for (GSList* p = fm->calendars; p; p = p->next)
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
 
-	gtk_window_set_default_size(GTK_WINDOW(fm.mainWindow), 780, 630);
+	gtk_window_set_default_size(GTK_WINDOW(fm->mainWindow), 780, 630);
 
-	update_window_title(&fm);
+	update_window_title(fm);
 
-	gtk_widget_show_all(fm.mainWindow);
+	gtk_widget_show_all(fm->mainWindow);
+}
 
-	// handle invitations on command line
-	for (int i = 1; i < argc; ++i)
-		rpc_handle_cmd(argv[i], &fm);
+static void focal_startup(GApplication* app, FocalMain* fm)
+{
+	// needed to generate unique uuids for new events
+	srand(time(NULL) * getpid());
 
-	gtk_main();
+	load_calendar_config(fm);
+}
+
+static void focal_activate(GApplication* app, FocalMain* fm)
+{
+	focal_create_main_window(app, fm);
+}
+
+static void focal_shutdown(GApplication* app, FocalMain* fm)
+{
+	g_slist_free_full(fm->calendars, g_object_unref);
+}
+
+static void focal_open(GApplication* app, GFile** files, gint n_files, gchar* hint, FocalMain* fm)
+{
+	if (!fm->mainWindow)
+		focal_create_main_window(app, fm);
+	for (int i = 0; i < n_files; ++i) {
+		icalcomponent* c = icalcomponent_from_file(g_file_get_path(files[i]));
+		if (c) {
+			icalcomponent* vev = icalcomponent_get_first_real_component(c);
+			if (vev) {
+				focal_add_event(fm, vev);
+			}
+		}
+	}
+}
+
+int main(int argc, char** argv)
+{
+	int status;
+	GtkApplication* app = gtk_application_new("net.ohwg.focal", G_APPLICATION_HANDLES_OPEN);
+	FocalMain fm = {0};
+
+	g_signal_connect(app, "startup", G_CALLBACK(focal_startup), &fm);
+	g_signal_connect(app, "activate", G_CALLBACK(focal_activate), &fm);
+	g_signal_connect(app, "shutdown", G_CALLBACK(focal_shutdown), &fm);
+	g_signal_connect(app, "open", G_CALLBACK(focal_open), &fm);
+	g_application_register(G_APPLICATION(app), NULL, NULL);
+
+	status = g_application_run(G_APPLICATION(app), argc, argv);
+	g_object_unref(app);
+
+	return status;
 }

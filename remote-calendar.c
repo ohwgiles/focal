@@ -102,10 +102,18 @@ static void free_events(RemoteCalendar* rc)
 			free(icalcomponent_get_private(ev)->url);
 			icalcomponent_free_private(ev);
 			icalcomponent_free(icalcomponent_get_parent(ev));
-			free(ev);
 		}
 	}
 	g_slist_free(rc->events);
+}
+
+static void finalize(GObject* gobject)
+{
+	RemoteCalendar* rc = FOCAL_REMOTE_CALENDAR(gobject);
+	free_events(rc);
+	caldav_client_free(rc->caldav);
+	free(rc->url);
+	G_OBJECT_CLASS(remote_calendar_parent_class)->finalize(gobject);
 }
 
 void remote_calendar_init(RemoteCalendar* rc)
@@ -118,6 +126,7 @@ void remote_calendar_class_init(RemoteCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 void remote_calendar_sync(RemoteCalendar* rc)
