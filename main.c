@@ -209,11 +209,56 @@ static void on_nav_next(GtkButton* button, FocalMain* fm)
 	update_window_title(fm);
 }
 
+static void on_calendar_menu(GtkButton* button, FocalMain* fm)
+{
+	GMenu* m = g_menu_new();
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		Calendar* cal = FOCAL_CALENDAR(p->data);
+		char* action_name = g_strdup_printf("win.toggle-calendar.%s", calendar_get_name(cal));
+		g_menu_append(m, calendar_get_name(cal), action_name);
+		g_free(action_name);
+	}
+
+	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(m));
+	gtk_popover_popdown(GTK_POPOVER(menu));
+	gtk_widget_show(menu);
+}
+
+void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
+{
+	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
+	Calendar* calendar = NULL;
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		if (strcmp(calendar_name, calendar_get_name(FOCAL_CALENDAR(p->data))) == 0) {
+			calendar = FOCAL_CALENDAR(p->data);
+			break;
+		}
+	}
+
+	if (!calendar)
+		return;
+
+	if (g_variant_get_boolean(value))
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
+	else
+		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
+
+	g_simple_action_set_state(action, value);
+}
+
 static void focal_create_main_window(GApplication* app, FocalMain* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 	fm->weekView = week_view_new();
 	fm->eventDetail = event_panel_new();
+
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(FOCAL_CALENDAR(p->data)));
+		GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
+		g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
+		g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
+		g_free(action_name);
+	}
 
 	fm->popover = gtk_popover_new(fm->weekView);
 	gtk_popover_set_position(GTK_POPOVER(fm->popover), GTK_POS_RIGHT);
@@ -237,6 +282,11 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_container_add(GTK_CONTAINER(nav), next);
 	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, fm);
 	g_signal_connect(next, "clicked", (GCallback) &on_nav_next, fm);
+
+	GtkWidget* menu = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
+	g_signal_connect(menu, "clicked", (GCallback) &on_calendar_menu, fm);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu);
 
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), nav);
 	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), header);

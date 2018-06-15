@@ -67,6 +67,12 @@ void calendar_set_name(Calendar* self, const char* name)
 	priv->color.alpha = 0.85;
 }
 
+const char* calendar_get_name(Calendar* self)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return priv->name;
+}
+
 void calendar_set_email(Calendar* self, const char* email)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);

@@ -522,6 +522,13 @@ static void week_view_populate_view(WeekView* wv)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
+void week_view_remove_calendar(WeekView* wv, Calendar* cal)
+{
+	week_view_populate_view(wv);
+	wv->calendars = g_slist_remove(wv->calendars, cal);
+	week_view_populate_view(wv);
+}
+
 void week_view_previous(WeekView* wv)
 {
 	if (--wv->current_week == 0)

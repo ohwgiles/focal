@@ -40,6 +40,8 @@ void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, voi
 
 void calendar_set_name(Calendar* self, const char* name);
 
+const char* calendar_get_name(Calendar* self);
+
 void calendar_set_email(Calendar* self, const char* email);
 
 const char* calendar_get_email(Calendar* self);
