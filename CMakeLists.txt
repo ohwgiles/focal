@@ -28,7 +28,10 @@ include_directories(${ICAL_INCLUDE_DIRS})
 
 # executable
 add_executable(${PROJECT_NAME}
+	accounts-dialog.c
+	account-edit-dialog.c
 	caldav-client.c
+	calendar-config.c
 	calendar.c
 	event-panel.c
 	event-private.c

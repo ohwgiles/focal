@@ -11,6 +11,8 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
+#include "accounts-dialog.h"
+#include "calendar-config.h"
 #include "event-panel.h"
 #include "event-private.h"
 #include "local-calendar.h"
@@ -24,6 +26,8 @@
 
 typedef struct {
 	GtkWidget* mainWindow;
+	char* config_path;
+	GSList* config;
 	GSList* calendars;
 	GtkWidget* weekView;
 	GtkWidget* popover;
@@ -134,58 +138,56 @@ static void event_save(EventPanel* event_panel, Calendar* cal, icalcomponent* ev
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
-static void load_calendar_config(FocalMain* fm)
+void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
 {
-	GKeyFile* config = g_key_file_new();
-	gchar** groups;
-	gsize num_cals = 0;
-	const char *config_dir, *home;
-	char* config_file;
-
-	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
-		asprintf(&config_file, "%s/focal.conf", config_dir);
-	else if ((home = g_getenv("HOME")))
-		asprintf(&config_file, "%s/.config/focal.conf", home);
-	else
-		return (void) fprintf(stderr, "Could not find .config path\n");
-
-	g_key_file_load_from_file(config, config_file, G_KEY_FILE_KEEP_COMMENTS, NULL);
-	groups = g_key_file_get_groups(config, &num_cals);
-	free(config_file);
-
-	for (int i = 0; i < num_cals; ++i) {
-		Calendar* cal;
-		gchar* type = g_key_file_get_string(config, groups[i], "type", NULL);
-		if (g_strcmp0(type, "caldav") == 0) {
-			gchar* url = g_key_file_get_string(config, groups[i], "url", NULL);
-			gchar* user = g_key_file_get_string(config, groups[i], "user", NULL);
-			gchar* pass = g_key_file_get_string(config, groups[i], "pass", NULL);
-
-			cal = remote_calendar_new(url, user, pass);
-			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
-			g_free(url);
-			g_free(user);
-			g_free(pass);
-		} else if (g_strcmp0(type, "file") == 0) {
-			gchar* path = g_key_file_get_string(config, groups[i], "path", NULL);
-
-			cal = local_calendar_new(path);
-			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
-			g_free(path);
-		} else {
-			return (void) fprintf(stderr, "Unknown calendar type `%s'\n", type);
+	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
+	Calendar* calendar = NULL;
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		if (strcmp(calendar_name, calendar_get_name(FOCAL_CALENDAR(p->data))) == 0) {
+			calendar = FOCAL_CALENDAR(p->data);
+			break;
 		}
-		g_free(type);
+	}
 
-		calendar_set_name(cal, groups[i]);
-		char* email = g_key_file_get_string(config, groups[i], "email", NULL);
-		calendar_set_email(cal, email);
-		g_free(email);
+	if (!calendar)
+		return;
 
+	if (g_variant_get_boolean(value))
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
+	else
+		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
+
+	g_simple_action_set_state(action, value);
+}
+
+static void create_calendars(FocalMain* fm)
+{
+	for (GSList* p = fm->config; p; p = p->next) {
+		CalendarConfig* cfg = p->data;
+		Calendar* cal;
+		switch (cfg->type) {
+		case CAL_TYPE_CALDAV:
+			cal = remote_calendar_new(cfg->d.caldav.url, cfg->d.caldav.user, cfg->d.caldav.pass);
+			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
+			break;
+		case CAL_TYPE_FILE:
+			cal = local_calendar_new(cfg->d.file.path);
+			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
+			break;
+		}
+		calendar_set_name(cal, cfg->name);
+		calendar_set_email(cal, cfg->email);
 		fm->calendars = g_slist_append(fm->calendars, cal);
 	}
-	g_strfreev(groups);
-	g_key_file_free(config);
+
+	// create window actions
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(FOCAL_CALENDAR(p->data)));
+		GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
+		g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
+		g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
+		g_free(action_name);
+	}
 }
 
 static void update_window_title(FocalMain* fm)
@@ -211,39 +213,53 @@ static void on_nav_next(GtkButton* button, FocalMain* fm)
 
 static void on_calendar_menu(GtkButton* button, FocalMain* fm)
 {
-	GMenu* m = g_menu_new();
+	GMenu* menu_main = g_menu_new();
+	GMenu* menu_calanders = g_menu_new();
 	for (GSList* p = fm->calendars; p; p = p->next) {
 		Calendar* cal = FOCAL_CALENDAR(p->data);
 		char* action_name = g_strdup_printf("win.toggle-calendar.%s", calendar_get_name(cal));
-		g_menu_append(m, calendar_get_name(cal), action_name);
+		g_menu_append(menu_calanders, calendar_get_name(cal), action_name);
 		g_free(action_name);
 	}
 
-	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(m));
+	g_menu_append_section(menu_main, NULL, G_MENU_MODEL(menu_calanders));
+	g_menu_append(menu_main, "Accounts", "win.accounts");
+
+	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(menu_main));
 	gtk_popover_popdown(GTK_POPOVER(menu));
 	gtk_widget_show(menu);
 }
 
-void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
+static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
 {
-	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
-	Calendar* calendar = NULL;
+	FocalMain* fm = (FocalMain*) user_data;
+	// remove all calendars from view and remove window action
 	for (GSList* p = fm->calendars; p; p = p->next) {
-		if (strcmp(calendar_name, calendar_get_name(FOCAL_CALENDAR(p->data))) == 0) {
-			calendar = FOCAL_CALENDAR(p->data);
-			break;
-		}
+		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
+		char* action_name = g_strdup_printf("win.toggle-calendar.%s", calendar_get_name(p->data));
+		g_action_map_remove_action(G_ACTION_MAP(fm->mainWindow), action_name);
+		g_free(action_name);
 	}
+	// free all calendars and configs
+	g_slist_free_full(fm->calendars, g_object_unref);
+	fm->calendars = NULL;
+	// write new config back to file
+	calendar_config_write_to_file(fm->config_path, new_config);
+	// recreate calendars from new config
+	fm->config = new_config;
+	create_calendars(fm);
+	// add them back to the view
+	for (GSList* p = fm->calendars; p; p = p->next)
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
+}
 
-	if (!calendar)
-		return;
-
-	if (g_variant_get_boolean(value))
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
-	else
-		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
-
-	g_simple_action_set_state(action, value);
+static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
+{
+	FocalMain* fm = (FocalMain*) user_data;
+	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), fm->config);
+	g_signal_connect(accounts, "config-changed", (GCallback) on_config_changed, fm);
+	gtk_widget_show_all(accounts);
+	g_signal_connect(accounts, "response", G_CALLBACK(gtk_widget_destroy), NULL);
 }
 
 static void focal_create_main_window(GApplication* app, FocalMain* fm)
@@ -252,13 +268,14 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	fm->weekView = week_view_new();
 	fm->eventDetail = event_panel_new();
 
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(FOCAL_CALENDAR(p->data)));
-		GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
-		g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
-		g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
-		g_free(action_name);
-	}
+	// todo: better separation of ui from calendar models?
+	create_calendars(fm);
+
+	const GActionEntry entries[] = {
+		{"accounts", open_accounts_dialog},
+	};
+
+	g_action_map_add_action_entries(G_ACTION_MAP(fm->mainWindow), entries, G_N_ELEMENTS(entries), fm);
 
 	fm->popover = gtk_popover_new(fm->weekView);
 	gtk_popover_set_position(GTK_POPOVER(fm->popover), GTK_POS_RIGHT);
@@ -310,7 +327,15 @@ static void focal_startup(GApplication* app, FocalMain* fm)
 	// needed to generate unique uuids for new events
 	srand(time(NULL) * getpid());
 
-	load_calendar_config(fm);
+	const char *config_dir, *home;
+	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
+		asprintf(&fm->config_path, "%s/focal.conf", config_dir);
+	else if ((home = g_getenv("HOME")))
+		asprintf(&fm->config_path, "%s/.config/focal.conf", home);
+	else
+		return (void) fprintf(stderr, "Could not find .config path\n");
+
+	fm->config = calendar_config_load_from_file(fm->config_path);
 }
 
 static void focal_activate(GApplication* app, FocalMain* fm)
@@ -321,6 +346,8 @@ static void focal_activate(GApplication* app, FocalMain* fm)
 static void focal_shutdown(GApplication* app, FocalMain* fm)
 {
 	g_slist_free_full(fm->calendars, g_object_unref);
+	g_slist_free_full(fm->config, (GDestroyNotify) calendar_config_free);
+	free(fm->config_path);
 }
 
 static void focal_open(GApplication* app, GFile** files, gint n_files, gchar* hint, FocalMain* fm)
