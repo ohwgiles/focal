@@ -15,8 +15,6 @@
 #include "calendar-config.h"
 #include "event-panel.h"
 #include "event-private.h"
-#include "local-calendar.h"
-#include "remote-calendar.h"
 #include "week-view.h"
 
 #include <curl/curl.h>

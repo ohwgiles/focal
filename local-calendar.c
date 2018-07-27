@@ -77,17 +77,9 @@ void local_calendar_init(LocalCalendar* lc)
 {
 }
 
-void local_calendar_class_init(LocalCalendarClass* klass)
+static void local_calendar_sync(Calendar* c)
 {
-	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
-	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
-	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
-	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
-	G_OBJECT_CLASS(klass)->finalize = finalize;
-}
-
-void local_calendar_sync(LocalCalendar* lc)
-{
+	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
 	free_events(lc);
 	gchar* contents = NULL;
 	GError* err = NULL;
@@ -105,6 +97,16 @@ void local_calendar_sync(LocalCalendar* lc)
 	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); e; e = icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT)) {
 		lc->events = g_slist_append(lc->events, e);
 	}
+}
+
+void local_calendar_class_init(LocalCalendarClass* klass)
+{
+	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
+	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
+	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
+	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
+	FOCAL_CALENDAR_CLASS(klass)->sync = local_calendar_sync;
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 Calendar* local_calendar_new(const char* path)

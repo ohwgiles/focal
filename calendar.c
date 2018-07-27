@@ -41,6 +41,11 @@ void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, voi
 	FOCAL_CALENDAR_GET_CLASS(self)->each_event(self, callback, user);
 }
 
+void calendar_sync(Calendar* self)
+{
+	FOCAL_CALENDAR_GET_CLASS(self)->sync(self);
+}
+
 void calendar_class_init(CalendarClass* klass)
 {
 }
@@ -49,18 +54,16 @@ void calendar_init(Calendar* self)
 {
 }
 
-void calendar_set_name(Calendar* self, const char* name)
+const CalendarConfig* calendar_get_config(Calendar* self)
 {
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return priv->config;
 }
 
 const char* calendar_get_name(Calendar* self)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
 	return priv->config->name;
-}
-
-void calendar_set_email(Calendar* self, const char* email)
-{
 }
 
 const char* calendar_get_email(Calendar* self)
@@ -75,7 +78,7 @@ GdkRGBA* calendar_get_color(Calendar* self)
 	return &priv->color;
 }
 
-#include "remote-calendar.h"
+#include "caldav-calendar.h"
 #include "local-calendar.h"
 
 Calendar* calendar_create(CalendarConfig* cfg)
@@ -83,12 +86,10 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	Calendar* cal;
 	switch (cfg->type) {
 	case CAL_TYPE_CALDAV:
-		cal = remote_calendar_new(cfg->d.caldav.url, cfg->d.caldav.user, cfg->d.caldav.pass);
-		remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
+		cal = caldav_calendar_new(cfg->d.caldav.url, cfg->d.caldav.user, cfg->d.caldav.pass);
 		break;
 	case CAL_TYPE_FILE:
 		cal = local_calendar_new(cfg->d.file.path);
-		local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
 		break;
 	}
 
@@ -98,5 +99,6 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	gtk_hsv_to_rgb(hue, 0.7, 0.7, &priv->color.red, &priv->color.green, &priv->color.blue);
 	priv->color.alpha = 0.85;
 
+	calendar_sync(cal);
 	return cal;
 }

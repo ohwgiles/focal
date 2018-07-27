@@ -30,6 +30,7 @@ struct _CalendarClass {
 	void (*update_event)(Calendar*, icalcomponent* event);
 	void (*delete_event)(Calendar*, icalcomponent* event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
+	void (*sync)(Calendar*);
 };
 
 void calendar_add_event(Calendar* self, icalcomponent* event);
@@ -39,6 +40,10 @@ void calendar_update_event(Calendar* self, icalcomponent* event);
 void calendar_delete_event(Calendar* self, icalcomponent* event);
 
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
+
+void calendar_sync(Calendar* self);
+
+const CalendarConfig* calendar_get_config(Calendar* self);
 
 const char* calendar_get_name(Calendar* self);
 

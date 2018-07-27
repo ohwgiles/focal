@@ -1,5 +1,5 @@
 /*
- * remote-calendar.h
+ * caldav-calendar.h
  * This file is part of focal, a calendar application for Linux
  * Copyright 2018 Oliver Giles and focal contributors.
  *
@@ -11,18 +11,18 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef CALENDAR_REMOTE_H
-#define CALENDAR_REMOTE_H
+#ifndef CALDAV_CALENDAR_H
+#define CALDAV_CALENDAR_H
 
 #include "calendar.h"
 
-#define REMOTE_CALENDAR_TYPE (remote_calendar_get_type())
-G_DECLARE_FINAL_TYPE(RemoteCalendar, remote_calendar, FOCAL, REMOTE_CALENDAR, Calendar)
+#define CALDAV_CALENDAR_TYPE (caldav_calendar_get_type())
+G_DECLARE_FINAL_TYPE(CaldavCalendar, caldav_calendar, FOCAL, CALDAV_CALENDAR, Calendar)
 
-Calendar* remote_calendar_new(const char* url, const char* username, const char* password);
+Calendar* caldav_calendar_new(const char* url, const char* username, const char* password);
 
-void remote_calendar_sync(RemoteCalendar* cal);
+void caldav_calendar_sync(CaldavCalendar* cal);
 
-void remote_calendar_free(RemoteCalendar* cal);
+void caldav_calendar_free(CaldavCalendar* cal);
 
-#endif // CALENDAR_REMOTE_H
+#endif // CALDAV_CALENDAR_H

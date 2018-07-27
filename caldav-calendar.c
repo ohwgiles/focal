@@ -1,5 +1,5 @@
 /*
- * caldav-client.c
+ * caldav-calendar.c
  * This file is part of focal, a calendar application for Linux
  * Copyright 2018 Oliver Giles and focal contributors.
  *
@@ -13,18 +13,16 @@
  */
 #include <curl/curl.h>
 #include <libxml/SAX2.h>
-#include <string.h>
 
-#include "caldav-client.h"
-#include "calendar.h"
+#include "caldav-calendar.h"
 #include "event-private.h"
 
-struct _CaldavClient {
+struct _CaldavCalendar {
+	Calendar parent;
 	char* url;
-	char* username;
-	char* password;
-	gboolean verify_cert;
+	GSList* events;
 };
+G_DEFINE_TYPE(CaldavCalendar, caldav_calendar, TYPE_CALENDAR)
 
 typedef struct {
 	int depth;
@@ -114,7 +112,7 @@ static void xmlparse_tag_open(void* ctx, const xmlChar* fullname, const xmlChar*
 	xmlparse_ns_push(xpc, atts);
 	g_string_truncate(&xpc->chars, 0);
 }
-
+#if 0
 // Callback when SAX parser finds a closing XML tag during calendar init
 static void xmlparse_init_close(void* ctx, const xmlChar* name)
 {
@@ -122,7 +120,7 @@ static void xmlparse_init_close(void* ctx, const xmlChar* name)
 	// TODO save ctag and displayname
 	xmlparse_ns_pop(xpc);
 }
-
+#endif
 // Callback when SAX parser finds a closing XML tag during calendar-data REPORT
 static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 {
@@ -174,18 +172,8 @@ static size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* 
 	g_string_append_len((GString*) userdata, ptr, size * nmemb);
 	return size * nmemb;
 }
-
-CaldavClient* caldav_client_new(const char* url, const char* user, const char* pass, gboolean verify_cert)
-{
-	CaldavClient* cc = g_new0(CaldavClient, 1);
-	cc->url = g_strdup(url);
-	cc->username = g_strdup(user);
-	cc->password = g_strdup(pass);
-	cc->verify_cert = verify_cert;
-	return cc;
-}
-
-gboolean caldav_client_init(CaldavClient* cc)
+#if 0
+static gboolean query_displayname(RemoteCalendar* rc)
 {
 	CURLcode ret;
 	CURL* curl = curl_easy_init();
@@ -193,7 +181,9 @@ gboolean caldav_client_init(CaldavClient* cc)
 	if (!curl)
 		return FALSE;
 
-	curl_easy_setopt(curl, CURLOPT_URL, cc->url);
+	const CalendarConfig* cfg = calendar_get_config(FOCAL_CALENDAR(rc));
+
+	curl_easy_setopt(curl, CURLOPT_URL, rc->url);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PROPFIND");
 	struct curl_slist* headers = NULL;
 	headers = curl_slist_append(headers, "Depth: 0");
@@ -201,17 +191,17 @@ gboolean caldav_client_init(CaldavClient* cc)
 	headers = curl_slist_append(headers, "Content-Type: application/xml; charset=utf-8");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
 
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS,
-					 "<propfind xmlns=\"DAV:\">"
-					 "  <prop>"
-					 "     <displayname />"
-					 "     <getctag xmlns=\"http://calendarserver.org/ns/\"/>"
-					 "  </prop>"
-					 "</propfind>");
+	                 "<propfind xmlns=\"DAV:\">"
+	                 "  <prop>"
+	                 "     <displayname />"
+	                 "     <getctag xmlns=\"http://calendarserver.org/ns/\"/>"
+	                 "  </prop>"
+	                 "</propfind>");
 
 	GString* init_resp = g_string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
@@ -229,120 +219,17 @@ gboolean caldav_client_init(CaldavClient* cc)
 	XmlParseCtx ctx;
 	xmlctx_init(&ctx);
 	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
-								.startElement = xmlparse_tag_open,
-								.endElement = xmlparse_init_close};
+	                            .startElement = xmlparse_tag_open,
+	                            .endElement = xmlparse_init_close};
 	xmlSAXUserParseMemory(&my_handler, &ctx, init_resp->str, init_resp->len);
 	xmlctx_cleanup(&ctx);
 	g_string_free(init_resp, TRUE);
 
 	return TRUE;
 }
+#endif
 
-gboolean caldav_client_put_new(CaldavClient* cc, icalcomponent* event, const char* url)
-{
-	g_assert_nonnull(url);
-	CURL* curl = curl_easy_init();
-	if (!curl)
-		return FALSE;
-
-	struct curl_slist* headers = NULL;
-	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
-	headers = curl_slist_append(headers, "Expect:");
-	headers = curl_slist_append(headers, "If-None-Match: *");
-
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
-
-	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
-
-	CURLcode res = curl_easy_perform(curl);
-	curl_slist_free_all(headers);
-
-	free(caldata);
-	curl_easy_cleanup(curl);
-
-	return res == CURLE_OK;
-}
-
-gboolean caldav_client_put_update(CaldavClient* cc, icalcomponent* event, const char* url)
-{
-	g_assert_nonnull(url);
-	CURL* curl = curl_easy_init();
-	if (!curl)
-		return FALSE;
-
-	struct curl_slist* headers = NULL;
-	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
-	headers = curl_slist_append(headers, "Expect:");
-
-	char* purl;
-	char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
-	asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
-
-	curl_easy_setopt(curl, CURLOPT_URL, purl);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
-
-	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
-
-	CURLcode res = curl_easy_perform(curl);
-	curl_slist_free_all(headers);
-
-	free(caldata);
-	free(purl);
-	curl_easy_cleanup(curl);
-
-	return res == CURLE_OK;
-}
-
-gboolean caldav_client_delete(CaldavClient* cc, icalcomponent* event, const char* url)
-{
-	CURL* curl = curl_easy_init();
-	if (!curl)
-		return FALSE;
-
-	char* purl;
-	if (url) {
-		char* host_delim = strchrnul(strchr(cc->url, ':') + 3, '/');
-		asprintf(&purl, "%.*s%s", (int) (host_delim - cc->url), cc->url, url);
-	} else {
-		asprintf(&purl, "%s/%s.ics", cc->url, icalcomponent_get_uid(event));
-	}
-
-	curl_easy_setopt(curl, CURLOPT_URL, purl);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-
-	struct curl_slist* headers = NULL;
-	// TODO use caldav etag
-	// headers = curl_slist_append(headers, "If-Match: ETAG_HERE");
-
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
-
-	CURLcode res = curl_easy_perform(curl);
-	curl_slist_free_all(headers);
-
-	free(purl);
-	curl_easy_cleanup(curl);
-
-	return res == CURLE_OK;
-}
-
-GSList* caldav_client_sync(CaldavClient* cc)
+static GSList* do_caldav_sync(CaldavCalendar* rc)
 {
 	CURLcode ret;
 	CURL* curl = curl_easy_init();
@@ -350,7 +237,9 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	if (!curl)
 		return NULL;
 
-	curl_easy_setopt(curl, CURLOPT_URL, cc->url);
+	const CalendarConfig* cfg = calendar_get_config(FOCAL_CALENDAR(rc));
+
+	curl_easy_setopt(curl, CURLOPT_URL, rc->url);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
 	struct curl_slist* headers = NULL;
 	headers = curl_slist_append(headers, "Depth: 1");
@@ -358,9 +247,9 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	headers = curl_slist_append(headers, "Content-Type: application/xml; charset=utf-8");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cc->username);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cc->password);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, cc->verify_cert);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
 
 	GString* report_req = g_string_new(
 		"<d:sync-collection xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
@@ -398,10 +287,222 @@ GSList* caldav_client_sync(CaldavClient* cc)
 	return ctx.event_list;
 }
 
-void caldav_client_free(CaldavClient* c)
+static char* generate_ical_uid()
 {
-	g_free(c->url);
-	g_free(c->username);
-	g_free(c->password);
-	g_free(c);
+	char* buffer;
+	unsigned char uuid[16];
+	for (int i = 0; i < 16; ++i)
+		uuid[i] = (unsigned char) rand();
+	// according to rfc4122 section 4.4
+	uuid[8] = 0x80 | (uuid[8] & 0x5F);
+	uuid[7] = 0x40 | (uuid[7] & 0x0F);
+	asprintf(&buffer, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+			 uuid[0], uuid[1], uuid[2], uuid[3],
+			 uuid[4], uuid[5], uuid[6], uuid[7],
+			 uuid[8], uuid[9], uuid[10], uuid[11],
+			 uuid[12], uuid[13], uuid[14], uuid[15]);
+	return buffer;
+}
+
+static void add_event(Calendar* c, icalcomponent* event)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+
+	EventPrivate* priv = icalcomponent_create_private(event);
+
+	const char* uid = icalcomponent_get_uid(event);
+	if (uid == NULL) {
+		char* p = generate_ical_uid();
+		icalcomponent_set_uid(event, p);
+		free(p);
+		uid = icalcomponent_get_uid(event);
+	}
+
+	char* url;
+	asprintf(&url, "%s/%s.ics", rc->url, icalcomponent_get_uid(event));
+	priv->url = url;
+	priv->cal = c;
+
+	icalcomponent* parent = icalcomponent_get_parent(event);
+	/* The event should have no parent if it was created here, or moved
+	 * from another calendar, but it might have one if created from an
+	 * invite file */
+	if (parent == NULL) {
+		parent = icalcomponent_new_vcalendar();
+		icalcomponent_add_component(parent, event);
+	}
+
+	const CalendarConfig* cfg = calendar_get_config(c);
+
+	g_assert_nonnull(url);
+	CURL* curl = curl_easy_init();
+	if (!curl)
+		return;
+
+	struct curl_slist* headers = NULL;
+	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
+	headers = curl_slist_append(headers, "Expect:");
+	headers = curl_slist_append(headers, "If-None-Match: *");
+
+	curl_easy_setopt(curl, CURLOPT_URL, url);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
+
+	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
+
+	curl_easy_perform(curl);
+	curl_slist_free_all(headers);
+
+	free(caldata);
+	curl_easy_cleanup(curl);
+}
+
+static void update_event(Calendar* c, icalcomponent* event)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+	EventPrivate* priv = icalcomponent_get_private(event);
+	const CalendarConfig* cfg = calendar_get_config(c);
+
+	CURL* curl = curl_easy_init();
+
+	struct curl_slist* headers = NULL;
+	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
+	headers = curl_slist_append(headers, "Expect:");
+
+	char* purl;
+	char* host_delim = strchrnul(strchr(rc->url, ':') + 3, '/');
+	asprintf(&purl, "%.*s%s", (int) (host_delim - rc->url), rc->url, priv->url);
+
+	curl_easy_setopt(curl, CURLOPT_URL, purl);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
+
+	char* caldata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, caldata);
+
+	curl_easy_perform(curl);
+	curl_slist_free_all(headers);
+
+	free(caldata);
+	free(purl);
+	curl_easy_cleanup(curl);
+}
+
+static void delete_event(Calendar* c, icalcomponent* event)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+	EventPrivate* priv = icalcomponent_get_private(event);
+	const CalendarConfig* cfg = calendar_get_config(c);
+
+	CURL* curl = curl_easy_init();
+	if (!curl)
+		return;
+
+	char* purl;
+	if (priv->url) {
+		char* host_delim = strchrnul(strchr(rc->url, ':') + 3, '/');
+		asprintf(&purl, "%.*s%s", (int) (host_delim - rc->url), rc->url, priv->url);
+	} else {
+		asprintf(&purl, "%s/%s.ics", rc->url, icalcomponent_get_uid(event));
+	}
+
+	curl_easy_setopt(curl, CURLOPT_URL, purl);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+
+	struct curl_slist* headers = NULL;
+	// TODO use caldav etag
+	// headers = curl_slist_append(headers, "If-Match: ETAG_HERE");
+
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
+	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
+	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
+
+	curl_easy_perform(curl);
+	curl_slist_free_all(headers);
+
+	free(purl);
+	curl_easy_cleanup(curl);
+}
+
+static void each_event(Calendar* c, CalendarEachEventCallback callback, void* user)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+	for (GSList* p = rc->events; p; p = p->next) {
+		if (p->data)
+			callback(user, (Calendar*) rc, (icalcomponent*) p->data);
+	}
+}
+
+static void free_events(CaldavCalendar* rc)
+{
+	for (GSList* p = rc->events; p; p = p->next) {
+		if (p->data) {
+			icalcomponent* ev = (icalcomponent*) p->data;
+			free(icalcomponent_get_private(ev)->url);
+			icalcomponent_free_private(ev);
+			icalcomponent_free(icalcomponent_get_parent(ev));
+		}
+	}
+	g_slist_free(rc->events);
+}
+
+static void caldav_sync(Calendar* c)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+	free_events(rc);
+	rc->events = do_caldav_sync(rc);
+	for (GSList* p = rc->events; p; p = p->next) {
+		icalcomponent* ev = p->data;
+		icalcomponent_get_private(ev)->cal = FOCAL_CALENDAR(rc);
+	}
+}
+
+static void finalize(GObject* gobject)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(gobject);
+	free_events(rc);
+	free(rc->url);
+	G_OBJECT_CLASS(caldav_calendar_parent_class)->finalize(gobject);
+}
+
+void caldav_calendar_init(CaldavCalendar* rc)
+{
+}
+
+void caldav_calendar_class_init(CaldavCalendarClass* klass)
+{
+	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
+	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
+	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
+	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
+	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
+	G_OBJECT_CLASS(klass)->finalize = finalize;
+}
+
+Calendar* caldav_calendar_new(const char* url, const char* username, const char* password)
+{
+	CaldavCalendar* rc = g_object_new(CALDAV_CALENDAR_TYPE, NULL);
+	rc->url = strdup(url);
+	rc->events = NULL;
+	// TODO cfg is not set yet, but this is not yet useful
+	//query_displayname(rc);
+	return (Calendar*) rc;
+}
+
+void caldav_calendar_free(CaldavCalendar* rc)
+{
+	free(rc->url);
+	free_events(rc);
+	g_free(rc);
 }

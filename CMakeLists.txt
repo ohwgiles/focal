@@ -30,14 +30,13 @@ include_directories(${ICAL_INCLUDE_DIRS})
 add_executable(${PROJECT_NAME}
 	accounts-dialog.c
 	account-edit-dialog.c
-	caldav-client.c
+	caldav-calendar.c
 	calendar-config.c
 	calendar.c
 	event-panel.c
 	event-private.c
 	local-calendar.c
 	main.c
-	remote-calendar.c
 	week-view.c
 )
 

@@ -21,8 +21,6 @@ G_DECLARE_FINAL_TYPE(LocalCalendar, local_calendar, FOCAL, LOCAL_CALENDAR, Calen
 
 Calendar* local_calendar_new(const char* path);
 
-void local_calendar_sync(LocalCalendar* cal);
-
 void local_calendar_free(LocalCalendar* cal);
 
 #endif // LOCAL_CALENDAR_H
