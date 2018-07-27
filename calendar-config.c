@@ -54,26 +54,15 @@ GSList* calendar_config_load_from_file(const char* config_file)
 
 	for (int i = 0; i < num_cals; ++i) {
 		CalendarConfig* cfg = g_new0(CalendarConfig, 1);
-		//Calendar* cal;
 		gchar* type = g_key_file_get_string(keyfile, groups[i], "type", NULL);
 		if (g_strcmp0(type, "caldav") == 0) {
 			cfg->type = CAL_TYPE_CALDAV;
 			cfg->d.caldav.url = g_key_file_get_string(keyfile, groups[i], "url", NULL);
 			cfg->d.caldav.user = g_key_file_get_string(keyfile, groups[i], "user", NULL);
 			cfg->d.caldav.pass = g_key_file_get_string(keyfile, groups[i], "pass", NULL);
-			/*
-			cal = remote_calendar_new(url, user, pass);
-			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
-			g_free(url);
-			g_free(user);
-			g_free(pass);*/
 		} else if (g_strcmp0(type, "file") == 0) {
 			cfg->type = CAL_TYPE_FILE;
 			cfg->d.file.path = g_key_file_get_string(keyfile, groups[i], "path", NULL);
-			/*
-			cal = local_calendar_new(path);
-			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
-			g_free(path);*/
 		} else {
 			fprintf(stderr, "Unknown calendar type `%s'\n", type);
 			return NULL;
@@ -82,14 +71,7 @@ GSList* calendar_config_load_from_file(const char* config_file)
 
 		cfg->name = strdup(groups[i]);
 		cfg->email = g_key_file_get_string(keyfile, groups[i], "email", NULL);
-		/*
-		calendar_set_name(cal, groups[i]);
-		char* email = g_key_file_get_string(config, groups[i], "email", NULL);
-		calendar_set_email(cal, email);
-		g_free(email);*/
-
 		calendar_configs = g_slist_append(calendar_configs, cfg);
-		//fm->calendars = g_slist_append(fm->calendars, cal);
 	}
 	g_strfreev(groups);
 	g_key_file_free(keyfile);

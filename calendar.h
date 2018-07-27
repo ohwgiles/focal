@@ -17,6 +17,8 @@
 #include <gtk/gtk.h>
 #include <libical/ical.h>
 
+#include "calendar-config.h"
+
 #define TYPE_CALENDAR (calendar_get_type())
 G_DECLARE_DERIVABLE_TYPE(Calendar, calendar, FOCAL, CALENDAR, GObject)
 
@@ -38,14 +40,13 @@ void calendar_delete_event(Calendar* self, icalcomponent* event);
 
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
 
-void calendar_set_name(Calendar* self, const char* name);
-
 const char* calendar_get_name(Calendar* self);
-
-void calendar_set_email(Calendar* self, const char* email);
 
 const char* calendar_get_email(Calendar* self);
 
 GdkRGBA* calendar_get_color(Calendar* self);
+
+// factory method
+Calendar* calendar_create(CalendarConfig* config);
 
 #endif // CALENDAR_H

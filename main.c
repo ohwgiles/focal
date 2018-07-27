@@ -164,20 +164,7 @@ static void create_calendars(FocalMain* fm)
 {
 	for (GSList* p = fm->config; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
-		Calendar* cal;
-		switch (cfg->type) {
-		case CAL_TYPE_CALDAV:
-			cal = remote_calendar_new(cfg->d.caldav.url, cfg->d.caldav.user, cfg->d.caldav.pass);
-			remote_calendar_sync(FOCAL_REMOTE_CALENDAR(cal));
-			break;
-		case CAL_TYPE_FILE:
-			cal = local_calendar_new(cfg->d.file.path);
-			local_calendar_sync(FOCAL_LOCAL_CALENDAR(cal));
-			break;
-		}
-		calendar_set_name(cal, cfg->name);
-		calendar_set_email(cal, cfg->email);
-		fm->calendars = g_slist_append(fm->calendars, cal);
+		fm->calendars = g_slist_append(fm->calendars, calendar_create(cfg));
 	}
 
 	// create window actions
