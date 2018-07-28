@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "accounts-dialog.h"
+#include "async-curl.h"
 #include "calendar-config.h"
 #include "event-panel.h"
 #include "event-private.h"
@@ -158,11 +159,21 @@ void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
 	g_simple_action_set_state(action, value);
 }
 
+static void calendar_synced(FocalMain* fm, Calendar* cal)
+{
+	// TODO more efficiently?
+	week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
+	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
+}
+
 static void create_calendars(FocalMain* fm)
 {
 	for (GSList* p = fm->config; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
-		fm->calendars = g_slist_append(fm->calendars, calendar_create(cfg));
+		Calendar* cal = calendar_create(cfg);
+		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
+		calendar_sync(cal);
+		fm->calendars = g_slist_append(fm->calendars, cal);
 	}
 
 	// create window actions
@@ -233,9 +244,6 @@ static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer 
 	// recreate calendars from new config
 	fm->config = new_config;
 	create_calendars(fm);
-	// add them back to the view
-	for (GSList* p = fm->calendars; p; p = p->next)
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
 }
 
 static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
@@ -297,9 +305,6 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
 	gtk_container_add(GTK_CONTAINER(fm->mainWindow), sw);
 
-	for (GSList* p = fm->calendars; p; p = p->next)
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
-
 	gtk_window_set_default_size(GTK_WINDOW(fm->mainWindow), 780, 630);
 
 	update_window_title(fm);
@@ -311,6 +316,8 @@ static void focal_startup(GApplication* app, FocalMain* fm)
 {
 	// needed to generate unique uuids for new events
 	srand(time(NULL) * getpid());
+
+	async_curl_init();
 
 	const char *config_dir, *home;
 	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
@@ -333,6 +340,7 @@ static void focal_shutdown(GApplication* app, FocalMain* fm)
 	g_slist_free_full(fm->calendars, g_object_unref);
 	g_slist_free_full(fm->config, (GDestroyNotify) calendar_config_free);
 	free(fm->config_path);
+	async_curl_cleanup();
 }
 
 static void focal_open(GApplication* app, GFile** files, gint n_files, gchar* hint, FocalMain* fm)

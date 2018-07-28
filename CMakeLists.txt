@@ -30,6 +30,7 @@ include_directories(${ICAL_INCLUDE_DIRS})
 add_executable(${PROJECT_NAME}
 	accounts-dialog.c
 	account-edit-dialog.c
+	async-curl.c
 	caldav-calendar.c
 	calendar-config.c
 	calendar.c

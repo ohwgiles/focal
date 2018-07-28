@@ -215,6 +215,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			rect.y = HEADER_HEIGHT + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
 
+			/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
 			week_view_add_event(wv, wv->calendars->data, ev);
 			gtk_widget_queue_draw((GtkWidget*) wv);
 			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, wv->calendars->data, ev, &rect);

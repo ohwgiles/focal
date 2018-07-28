@@ -97,6 +97,8 @@ static void local_calendar_sync(Calendar* c)
 	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); e; e = icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT)) {
 		lc->events = g_slist_append(lc->events, e);
 	}
+
+	g_signal_emit_by_name(c, "sync-done", 0);
 }
 
 void local_calendar_class_init(LocalCalendarClass* klass)

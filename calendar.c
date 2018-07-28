@@ -21,6 +21,13 @@ typedef struct {
 
 G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
 
+enum {
+	SIGNAL_SYNC_DONE,
+	LAST_SIGNAL
+};
+
+static gint calendar_signals[LAST_SIGNAL] = {0};
+
 void calendar_add_event(Calendar* self, icalcomponent* event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->add_event(self, event);
@@ -48,6 +55,8 @@ void calendar_sync(Calendar* self)
 
 void calendar_class_init(CalendarClass* klass)
 {
+	GObjectClass* goc = (GObjectClass*) klass;
+	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 void calendar_init(Calendar* self)
@@ -99,6 +108,5 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	gtk_hsv_to_rgb(hue, 0.7, 0.7, &priv->color.red, &priv->color.green, &priv->color.blue);
 	priv->color.alpha = 0.85;
 
-	calendar_sync(cal);
 	return cal;
 }
