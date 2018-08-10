@@ -525,7 +525,6 @@ static void week_view_populate_view(WeekView* wv)
 
 void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 {
-	week_view_populate_view(wv);
 	wv->calendars = g_slist_remove(wv->calendars, cal);
 	week_view_populate_view(wv);
 }
