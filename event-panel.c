@@ -103,7 +103,9 @@ static void save_clicked(GtkButton* button, gpointer user_data)
 	GtkTextIter start, end;
 	gtk_text_buffer_get_start_iter(ew->description, &start);
 	gtk_text_buffer_get_end_iter(ew->description, &end);
-	icalcomponent_set_description(ew->selected_event, gtk_text_buffer_get_text(ew->description, &start, &end, FALSE));
+	char* desc = gtk_text_buffer_get_text(ew->description, &start, &end, FALSE);
+	icalcomponent_set_description(ew->selected_event, desc);
+	free(desc);
 	// start time
 	icaltimetype dtstart = icalcomponent_get_dtstart(ew->selected_event);
 	int minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->starts_at));
