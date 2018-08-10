@@ -206,6 +206,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			// duration: default event is 30min long
 			icaltime_adjust(&dtend, 0, 0, 30, 0);
 			icalcomponent* ev = icalcomponent_new_vevent();
+			icalcomponent_set_dtstamp(ev, icaltime_from_timet_with_zone(time(NULL), 0, wv->current_tz)); // required by ccs-calendarserver
 			icalcomponent_set_dtstart(ev, dtstart);
 			icalcomponent_set_dtend(ev, dtend);
 			icalcomponent_set_summary(ev, "New Event");

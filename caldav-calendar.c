@@ -349,6 +349,8 @@ static void add_event(Calendar* c, icalcomponent* event)
 	 * invite file */
 	if (parent == NULL) {
 		parent = icalcomponent_new_vcalendar();
+		icalcomponent_add_property(parent, icalproperty_new_version("2.0"));
+		icalcomponent_add_property(parent, icalproperty_new_prodid("-//OHWG//FOCAL"));
 		icalcomponent_add_component(parent, event);
 	}
 
