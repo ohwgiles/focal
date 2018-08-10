@@ -19,7 +19,7 @@
 #define CALDAV_CALENDAR_TYPE (caldav_calendar_get_type())
 G_DECLARE_FINAL_TYPE(CaldavCalendar, caldav_calendar, FOCAL, CALDAV_CALENDAR, Calendar)
 
-Calendar* caldav_calendar_new(const char* url, const char* username, const char* password);
+Calendar* caldav_calendar_new(const CalendarConfig* cfg);
 
 void caldav_calendar_sync(CaldavCalendar* cal);
 

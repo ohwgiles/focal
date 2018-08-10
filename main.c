@@ -172,8 +172,8 @@ static void create_calendars(FocalMain* fm)
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
-		calendar_sync(cal);
 		fm->calendars = g_slist_append(fm->calendars, cal);
+		calendar_sync(cal);
 	}
 
 	// create window actions
@@ -224,6 +224,14 @@ static void on_calendar_menu(GtkButton* button, FocalMain* fm)
 	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(menu_main));
 	gtk_popover_popdown(GTK_POPOVER(menu));
 	gtk_widget_show(menu);
+}
+
+static void on_sync_clicked(GtkButton* button, FocalMain* fm)
+{
+	for (GSList* p = fm->calendars; p; p = p->next) {
+		Calendar* cal = FOCAL_CALENDAR(p->data);
+		calendar_sync(cal);
+	}
 }
 
 static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
@@ -297,6 +305,11 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
 	g_signal_connect(menu, "clicked", (GCallback) &on_calendar_menu, fm);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu);
+
+	GtkWidget* syncbutton = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(syncbutton), gtk_image_new_from_icon_name("emblem-synchronizing-symbolic", GTK_ICON_SIZE_MENU));
+	g_signal_connect(syncbutton, "clicked", (GCallback) &on_sync_clicked, fm);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), syncbutton);
 
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), nav);
 	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), header);

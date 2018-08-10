@@ -27,6 +27,7 @@ typedef struct {
 	/* Focal application fields defined here */
 	Calendar* cal;
 	char* url;
+	char* etag;
 } EventPrivate;
 
 gboolean icalcomponent_has_private(icalcomponent* cmp);

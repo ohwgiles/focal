@@ -95,7 +95,7 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	Calendar* cal;
 	switch (cfg->type) {
 	case CAL_TYPE_CALDAV:
-		cal = caldav_calendar_new(cfg->d.caldav.url, cfg->d.caldav.user, cfg->d.caldav.pass);
+		cal = caldav_calendar_new(cfg);
 		break;
 	case CAL_TYPE_FILE:
 		cal = local_calendar_new(cfg->d.file.path);

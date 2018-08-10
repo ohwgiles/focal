@@ -20,7 +20,9 @@
 
 struct _CaldavCalendar {
 	Calendar parent;
-	char* url;
+	const CalendarConfig* cfg;
+	char* sync_token;
+	gboolean op_pending;
 	GSList* events;
 };
 G_DEFINE_TYPE(CaldavCalendar, caldav_calendar, TYPE_CALENDAR)
@@ -31,13 +33,19 @@ typedef struct {
 } XmlNs;
 
 typedef struct {
+	// internal members used in raw xml parsing
 	GString chars;
 	int depth;
 	GQueue* ns_defaults;
 	GHashTable* ns_aliases;
-	GSList* hrefs;
-	GSList* event_list;
+	// fields of interest parsed from the xml
+	int status;
 	char* current_href;
+	char* current_etag;
+	char* current_caldata;
+	// final results to be consumed by the caller
+	GSList* result_list;
+	char* sync_token;
 } XmlParseCtx;
 
 static void xmlns_free(XmlNs* ns)
@@ -113,15 +121,13 @@ static void xmlparse_tag_open(void* ctx, const xmlChar* fullname, const xmlChar*
 	xmlparse_ns_push(xpc, atts);
 	g_string_truncate(&xpc->chars, 0);
 }
-#if 0
-// Callback when SAX parser finds a closing XML tag during calendar init
-static void xmlparse_init_close(void* ctx, const xmlChar* name)
-{
-	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
-	// TODO save ctag and displayname
-	xmlparse_ns_pop(xpc);
-}
-#endif
+
+typedef struct {
+	char* href;
+	char* etag;
+	char* caldata;
+} CaldavEntry;
+
 // Callback when SAX parser finds a closing XML tag during calendar-data REPORT
 static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 {
@@ -130,24 +136,59 @@ static void xmlparse_find_caldata(void* ctx, const xmlChar* name)
 		// store the href for the current response element
 		g_assert_null(xpc->current_href);
 		xpc->current_href = g_strdup(xpc->chars.str);
+	} else if (xml_tag_matches(xpc, name, "DAV:", "getetag")) {
+		g_assert_null(xpc->current_etag);
+		xpc->current_etag = g_strdup(xpc->chars.str);
 	} else if (xml_tag_matches(xpc, name, "DAV:", "response")) {
 		g_assert_nonnull(xpc->current_href);
-		g_free(xpc->current_href);
-		xpc->current_href = NULL;
-	} else if (xml_tag_matches(xpc, name, "urn:ietf:params:xml:ns:caldav", "calendar-data")) {
-		icalcomponent* comp = icalparser_parse_string(xpc->chars.str);
-		icalcomponent* vevent = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
+		// cannot assert that other fields are non-null, because if the response is not 200, they won't be supplied
+		CaldavEntry* e = malloc(sizeof(CaldavEntry));
+		// transfer ownership
+		e->href = xpc->current_href;
+		e->etag = xpc->current_etag;
+		e->caldata = xpc->current_caldata;
+		xpc->result_list = g_slist_append(xpc->result_list, e);
 
-		if (vevent) {
-			EventPrivate* fp = icalcomponent_create_private(vevent);
-			fp->url = g_strdup(xpc->current_href);
-			xpc->event_list = g_slist_append(xpc->event_list, vevent);
-		}
+		xpc->current_href = NULL;
+		xpc->current_etag = NULL;
+		xpc->current_caldata = NULL;
+	} else if (xml_tag_matches(xpc, name, "urn:ietf:params:xml:ns:caldav", "calendar-data")) {
+		g_assert_null(xpc->current_caldata);
+		xpc->current_caldata = g_strdup(xpc->chars.str);
 	}
 
 	xmlparse_ns_pop(xpc);
 }
 
+typedef struct {
+	char* href;
+	int status;
+} SyncEntry;
+
+// Callback when SAX parser finds a closing XML tag during sync-collection REPORT
+static void xmlparse_report_sync_collection(void* ctx, const xmlChar* name)
+{
+	XmlParseCtx* xpc = (XmlParseCtx*) ctx;
+	if (xml_tag_matches(xpc, name, "DAV:", "href")) {
+		// store the href for the current response element
+		g_assert_null(xpc->current_href);
+		xpc->current_href = g_strdup(xpc->chars.str);
+	} else if (xml_tag_matches(xpc, name, "DAV:", "status")) {
+		// store the status for the current response element
+		sscanf(xpc->chars.str, "HTTP/1.1 %d ", &xpc->status);
+	} else if (xml_tag_matches(xpc, name, "DAV:", "response")) {
+		g_assert_nonnull(xpc->current_href);
+		SyncEntry* e = malloc(sizeof(SyncEntry));
+		e->href = xpc->current_href;
+		e->status = xpc->status;
+		xpc->result_list = g_slist_append(xpc->result_list, e);
+		xpc->current_href = NULL;
+		xpc->status = 0;
+	} else if (xml_tag_matches(xpc, name, "DAV:", "sync-token")) {
+		xpc->sync_token = strdup(xpc->chars.str);
+	}
+	xmlparse_ns_pop(xpc);
+}
 // Initializes an XmlParseCtx. Those members which are only used in specific operations
 // must be allocated manually after calling this function
 static void xmlctx_init(XmlParseCtx* ctx)
@@ -173,62 +214,6 @@ static size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* 
 	g_string_append_len((GString*) userdata, ptr, size * nmemb);
 	return size * nmemb;
 }
-#if 0
-static gboolean query_displayname(RemoteCalendar* rc)
-{
-	CURLcode ret;
-	CURL* curl = curl_easy_init();
-
-	if (!curl)
-		return FALSE;
-
-	const CalendarConfig* cfg = calendar_get_config(FOCAL_CALENDAR(rc));
-
-	curl_easy_setopt(curl, CURLOPT_URL, rc->url);
-	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PROPFIND");
-	struct curl_slist* headers = NULL;
-	headers = curl_slist_append(headers, "Depth: 0");
-	headers = curl_slist_append(headers, "Prefer: return-minimal");
-	headers = curl_slist_append(headers, "Content-Type: application/xml; charset=utf-8");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, cfg->d.caldav.pass);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
-
-	curl_easy_setopt(curl, CURLOPT_POSTFIELDS,
-	                 "<propfind xmlns=\"DAV:\">"
-	                 "  <prop>"
-	                 "     <displayname />"
-	                 "     <getctag xmlns=\"http://calendarserver.org/ns/\"/>"
-	                 "  </prop>"
-	                 "</propfind>");
-
-	GString* init_resp = g_string_new(NULL);
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, init_resp);
-
-	ret = curl_easy_perform(curl);
-	curl_slist_free_all(headers);
-	curl_easy_cleanup(curl);
-
-	if (ret != CURLE_OK) {
-		g_string_free(init_resp, TRUE);
-		return FALSE;
-	}
-
-	XmlParseCtx ctx;
-	xmlctx_init(&ctx);
-	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
-	                            .startElement = xmlparse_tag_open,
-	                            .endElement = xmlparse_init_close};
-	xmlSAXUserParseMemory(&my_handler, &ctx, init_resp->str, init_resp->len);
-	xmlctx_cleanup(&ctx);
-	g_string_free(init_resp, TRUE);
-
-	return TRUE;
-}
-#endif
 
 static char* generate_ical_uid()
 {
@@ -293,6 +278,18 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 	g_free(ac);
 }
 
+static size_t caldav_put_response_get_etag(char* ptr, size_t size, size_t nmemb, void* userdata)
+{
+	const int header_len = strlen("ETag: ");
+	if (strncmp(ptr, "ETag: ", header_len) == 0) {
+		char* etag = strdup(ptr + header_len);
+		// truncate CRLF
+		*strchrnul(etag, '\r') = 0;
+		icalcomponent_get_private((icalcomponent*) userdata)->etag = etag;
+	}
+	return size * nmemb;
+}
+
 static void caldav_put(CaldavCalendar* rc, icalcomponent* event, icalcomponent* replaces)
 {
 	EventPrivate* priv = icalcomponent_get_private(event);
@@ -301,19 +298,31 @@ static void caldav_put(CaldavCalendar* rc, icalcomponent* event, icalcomponent* 
 	ac->cal = rc;
 	ac->old_event = replaces;
 	ac->new_event = event;
-	const char* url_path = strchrnul(strchr(rc->url, ':') + 3, '/');
-	asprintf(&ac->url, "%.*s%s", (int) (url_path - rc->url), rc->url, priv->url);
+	const char* root_url = rc->cfg->d.caldav.url;
+
+	const char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
+	asprintf(&ac->url, "%.*s%s", (int) (url_path - root_url), root_url, priv->url);
 
 	CURL* curl = new_curl_request(calendar_get_config(FOCAL_CALENDAR(rc)), ac->url);
 	ac->hdrs = curl_slist_append(ac->hdrs, "Content-Type: text/calendar; charset=utf-8");
 	ac->hdrs = curl_slist_append(ac->hdrs, "Expect:");
 	/* TODO: use etag */
-	if (!replaces)
+	if (replaces) {
+		char* match;
+		asprintf(&match, "If-Match: %s", priv->etag);
+		ac->hdrs = curl_slist_append(ac->hdrs, match);
+		free(match);
+	} else {
 		ac->hdrs = curl_slist_append(ac->hdrs, "If-None-Match: *");
+	}
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ac->hdrs);
 	ac->cal_postdata = icalcomponent_as_ical_string(icalcomponent_get_parent(event));
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ac->cal_postdata);
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(ac->cal_postdata));
+
+	curl_easy_setopt(curl, CURLOPT_HEADERDATA, event);
+	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, caldav_put_response_get_etag);
 
 	async_curl_add_request(curl, caldav_modify_done, ac);
 }
@@ -330,8 +339,8 @@ static void add_event(Calendar* c, icalcomponent* event)
 		free(p);
 		uid = icalcomponent_get_uid(event);
 	}
-	const char* url_path = strchrnul(strchr(rc->url, ':') + 3, '/');
-	asprintf(&priv->url, "%s/%s.ics", url_path, icalcomponent_get_uid(event));
+	const char* url_path = strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/');
+	asprintf(&priv->url, "%s%s.ics", url_path, icalcomponent_get_uid(event));
 	priv->cal = c;
 
 	icalcomponent* parent = icalcomponent_get_parent(event);
@@ -354,23 +363,34 @@ static void update_event(Calendar* c, icalcomponent* event)
 static void delete_event(Calendar* c, icalcomponent* event)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
+
+	// if the component has no private data, it has never been added to this calendar
+	if (!icalcomponent_has_private(event))
+		return;
+
 	EventPrivate* priv = icalcomponent_get_private(event);
 
 	ModifyContext* pc = g_new0(ModifyContext, 1);
 	pc->cal = rc;
 	pc->old_event = event;
 	// TODO is this if stmt really needed?
+	const char* root_url = rc->cfg->d.caldav.url;
 	if (priv->url) {
-		char* url_path = strchrnul(strchr(rc->url, ':') + 3, '/');
-		asprintf(&pc->url, "%.*s%s", (int) (url_path - rc->url), rc->url, priv->url);
+		char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
+		asprintf(&pc->url, "%.*s%s", (int) (url_path - root_url), root_url, priv->url);
 	} else {
-		asprintf(&pc->url, "%s/%s.ics", rc->url, icalcomponent_get_uid(event));
+		asprintf(&pc->url, "%s%s.ics", root_url, icalcomponent_get_uid(event));
 	}
 
 	CURL* curl = new_curl_request(calendar_get_config(c), pc->url);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
-	// TODO use caldav etag
-	// headers = curl_slist_append(headers, "If-Match: ETAG_HERE");
+
+	// set the If-Match header
+	char* match;
+	asprintf(&match, "If-Match: %s", priv->etag);
+	pc->hdrs = curl_slist_append(pc->hdrs, match);
+	free(match);
+
 	async_curl_add_request(curl, caldav_modify_done, pc);
 }
 
@@ -382,17 +402,40 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 	}
 }
 
+static void free_event(icalcomponent* ev)
+{
+	free(icalcomponent_get_private(ev)->url);
+	icalcomponent_free_private(ev);
+	icalcomponent_free(icalcomponent_get_parent(ev));
+}
+
 static void free_events(CaldavCalendar* rc)
 {
-	for (GSList* p = rc->events; p; p = p->next) {
-		if (p->data) {
-			icalcomponent* ev = (icalcomponent*) p->data;
-			free(icalcomponent_get_private(ev)->url);
-			icalcomponent_free_private(ev);
-			icalcomponent_free(icalcomponent_get_parent(ev));
-		}
-	}
-	g_slist_free(rc->events);
+	g_slist_free_full(rc->events, (GDestroyNotify) free_event);
+}
+
+static icalcomponent* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde)
+{
+	// event updated
+	icalcomponent* comp = icalparser_parse_string(cde->caldata);
+	icalcomponent* event = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
+	g_assert_nonnull(event);
+	EventPrivate* fp = icalcomponent_create_private(event);
+	fp->cal = FOCAL_CALENDAR(cal);
+	// transfer ownership
+	fp->url = cde->href;
+	fp->etag = cde->etag;
+	free(cde->caldata);
+	free(cde);
+	return event;
+}
+
+void caldav_entry_free(CaldavEntry* cde)
+{
+	free(cde->href);
+	free(cde->etag);
+	free(cde->caldata);
+	free(cde);
 }
 
 typedef struct {
@@ -402,44 +445,239 @@ typedef struct {
 	GString* report_resp;
 } SyncContext;
 
-static void sync_done(CURL* curl, CURLcode ret, void* user)
+static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 {
 	SyncContext* sc = (SyncContext*) user;
+	CaldavCalendar* rc = sc->cal;
 
+	// No matter what happened, these are no longer needed
 	curl_slist_free_all(sc->hdrs);
 	g_string_free(sc->report_req, TRUE);
 
-	if (ret == CURLE_OK) {
-		XmlParseCtx ctx;
-		xmlctx_init(&ctx);
-		xmlSAXHandler my_handler = {.characters = xmlparse_characters,
-									.startElement = xmlparse_tag_open,
-									.endElement = xmlparse_find_caldata};
-		xmlSAXUserParseMemory(&my_handler, &ctx, sc->report_resp->str, sc->report_resp->len);
-		xmlctx_cleanup(&ctx);
+	// Debug
+	//printf("sync done: [%s]\n", sc->report_resp->str);
 
-		sc->cal->events = ctx.event_list;
-		for (GSList* p = sc->cal->events; p; p = p->next) {
-			icalcomponent* ev = p->data;
-			icalcomponent_get_private(ev)->cal = FOCAL_CALENDAR(sc->cal);
-		}
-		g_signal_emit_by_name(sc->cal, "sync-done", 0);
-	} else {
+	// Handle the case where the http request failed
+	if (ret != CURLE_OK) {
 		// TODO report error via UI
 		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		sc->cal->op_pending = FALSE;
+		g_string_free(sc->report_resp, TRUE);
+		free(sc);
+		return;
 	}
 
+	// Parse the response
+	XmlParseCtx ctx;
+	xmlctx_init(&ctx);
+	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
+								.startElement = xmlparse_tag_open,
+								.endElement = xmlparse_find_caldata};
+	xmlSAXUserParseMemory(&my_handler, &ctx, sc->report_resp->str, sc->report_resp->len);
+	xmlctx_cleanup(&ctx);
 	g_string_free(sc->report_resp, TRUE);
+	// ctx.result_list now contains a GSList of CaldavEntry structs
+
+	// Debug counters
+	int nUpdated = 0, nNew = 0;
+
+	// Merge the results from the sync with the existing events
+	GSList** n = &ctx.result_list;
+	while (*n) {
+		CaldavEntry* cde = (*n)->data;
+		// Look through the existing list of events for matching resources
+		for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
+			EventPrivate* pp = icalcomponent_get_private((*p)->data);
+			if (strcmp(cde->href, pp->url) == 0) {
+				if (cde->caldata) {
+					// event updated
+					if (strcmp(cde->etag, pp->etag) == 0) {
+						// we already knew about this update (we probably did it ourselves). Just ignore it.
+						caldav_entry_free(cde);
+					} else {
+						// replace the old event with the new one
+						free_event((*p)->data);
+						(*p)->data = create_event_from_parsed_xml(rc, cde);
+						nUpdated++;
+					}
+				} else {
+					// If the calendar-data is NULL, assume the event is deleted. This can
+					// happen if an event is removed after the sync-collection request but
+					// before the response to this multiget.
+					free_event((*p)->data);
+					*p = (*p)->next;
+					caldav_entry_free(cde);
+				}
+				// Since a match was found and dealt with, remove this entry from the list
+				*n = (*n)->next;
+				// break & continue,
+				goto sync_populate_local_list_event_matched;
+			}
+		}
+		// if we get here, there was no matching resource in the existing list.
+		// so move onto the next entry. If it was matched we have already advanced
+		n = &(*n)->next;
+		// empty statement for "break & continue"
+	sync_populate_local_list_event_matched:
+		(void) 0;
+	}
+
+	// Everything remaining in ctx.event_list should be new events
+	for (GSList* e = ctx.result_list; e; e = e->next) {
+		CaldavEntry* cde = e->data;
+		// A removal or permission denied that was not matched in the local list above will still be here,
+		// but its caldata member will be empty. So it can be ignored.
+		if (cde->caldata) {
+			icalcomponent* event = create_event_from_parsed_xml(rc, cde);
+			sc->cal->events = g_slist_append(sc->cal->events, event);
+			nNew++;
+		} else {
+			caldav_entry_free(cde);
+		}
+	}
+	g_slist_free(ctx.result_list);
+
+	// print debug counters
+	printf("sync: %d updated, %d new\n", nUpdated, nNew);
+
 	g_free(sc);
+
+	// All done, notify
+	rc->op_pending = FALSE;
+	g_signal_emit_by_name(rc, "sync-done", 0);
+}
+
+static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
+{
+	SyncContext* sc = (SyncContext*) user;
+	CaldavCalendar* rc = sc->cal;
+
+	// No matter what happened, these are no longer needed
+	curl_slist_free_all(sc->hdrs);
+	g_string_free(sc->report_req, TRUE);
+
+	// Debug
+	//printf("sync done: [%s]\n", sc->report_resp->str);
+
+	// Handle the case where the http request failed
+	if (ret != CURLE_OK) {
+		// TODO report error via UI
+		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		sc->cal->op_pending = FALSE;
+		g_string_free(sc->report_resp, TRUE);
+		free(sc);
+		return;
+	}
+
+	// Parse the response
+	XmlParseCtx ctx;
+	xmlctx_init(&ctx);
+	xmlSAXHandler my_handler = {.characters = xmlparse_characters,
+								.startElement = xmlparse_tag_open,
+								.endElement = xmlparse_report_sync_collection};
+	xmlSAXUserParseMemory(&my_handler, &ctx, sc->report_resp->str, sc->report_resp->len);
+	xmlctx_cleanup(&ctx);
+	g_string_free(sc->report_resp, TRUE);
+
+	// Store the new sync-token for subsequent sync operations
+	free(sc->cal->sync_token);
+	sc->cal->sync_token = ctx.sync_token; // (xfer ownership)
+
+	// Any resource that returned a 404 shall be deleted from the local collection.
+	// All others will be queried. Servers cannot be relied on to deliver status 200 here.
+	int nDeleted = 0;
+	GSList* hrefs = NULL;
+	for (GSList* s = ctx.result_list; s; s = s->next) {
+		SyncEntry* se = s->data;
+		if (se->status == 404) {
+			for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
+				EventPrivate* pp = icalcomponent_get_private((*p)->data);
+				if (strcmp(se->href, pp->url) == 0) {
+					free_event((*p)->data);
+					*p = (*p)->next;
+					nDeleted++;
+					break;
+				}
+			}
+			free(se->href);
+		} else {
+			hrefs = g_slist_append(hrefs, se->href);
+		}
+	}
+	g_slist_free_full(ctx.result_list, free);
+
+	// early return in the case where there are no new or updated events
+	if (hrefs == NULL) {
+		if (nDeleted) {
+			printf("sync: %d deleted\n", nDeleted);
+		} else {
+			printf("sync: no changes\n");
+		}
+		// sync-done here is necessary if items were deleted OR it's the initial sync.
+		// We know whether we deleted something but don't know if this is an initial sync.
+		g_signal_emit_by_name(rc, "sync-done", 0);
+		rc->op_pending = FALSE;
+		free(sc);
+		return;
+	}
+
+	// According to RFC6578 Appendix B, the next step is to send GET requests
+	// for each resource returned in the earlier sync-collection REPORT method.
+	// Here we instead use a calendar-multiget REPORT for efficiency.
+	// See https://tools.ietf.org/html/rfc6578#appendix-B
+
+	curl = new_curl_request(rc->cfg, rc->cfg->d.caldav.url);
+
+	sc->hdrs = curl_slist_append(NULL, "Depth: 1");
+	sc->hdrs = curl_slist_append(sc->hdrs, "Prefer: return-minimal");
+	sc->hdrs = curl_slist_append(sc->hdrs, "Content-Type: application/xml; charset=utf-8");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, sc->hdrs);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
+
+	// Build the query
+	sc->report_req = g_string_new(
+		"<?xml version=\"1.0\" encoding=\"utf-8\" ?>"
+		"<C:calendar-multiget xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\">"
+		"  <D:prop>"
+		"    <D:getetag/>"
+		"    <C:calendar-data/>"
+		"  </D:prop>");
+	for (GSList* p = hrefs; p; p = p->next)
+		g_string_append_printf(sc->report_req, "<D:href>%s</D:href>", (const char*) p->data);
+	g_string_append(sc->report_req, "</C:calendar-multiget>");
+
+	// Free the list of hrefs
+	g_slist_free_full(hrefs, free);
+
+	// Finalise and fire the multiget request
+	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, sc->report_req->str);
+
+	sc->report_resp = g_string_new(NULL);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, sc->report_resp);
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
+
+	async_curl_add_request(curl, sync_multiget_report_done, sc);
 }
 
 static void caldav_sync(Calendar* c)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
-	free_events(rc);
+	if (rc->op_pending) {
+		fprintf(stderr, "operation pending, early return from caldav_sync\n");
+		return;
+	}
 
-	CURL* curl = new_curl_request(calendar_get_config(c), rc->url);
+	// Block any other operations from happening until this is complete
+	rc->op_pending = TRUE;
 
+	// Begin sync operation. According to RFC6578, the first step is to send
+	// a sync-collection REPORT to retrieve a list of hrefs that have been
+	// updated since the last call to the API (identified by the sync-token)
+	// See https://tools.ietf.org/html/rfc6578#appendix-B
+
+	CURL* curl = new_curl_request(rc->cfg, rc->cfg->d.caldav.url);
+
+	// Userdata for the sync operation
 	SyncContext* sc = g_new0(SyncContext, 1);
 	sc->cal = rc;
 
@@ -449,29 +687,29 @@ static void caldav_sync(Calendar* c)
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, sc->hdrs);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
 
-	sc->report_req = g_string_new(
-		"<d:sync-collection xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
-		"  <d:sync-token></d:sync-token>"
-		"  <d:sync-level>1</d:sync-level>"
-		"  <d:prop>"
-		"    <c:calendar-data/>"
-		"    <d:getetag/>"
-		"  </d:prop>"
-		"</d:sync-collection>");
+	sc->report_req = g_string_new("");
+	g_string_append_printf(sc->report_req,
+						   "<d:sync-collection xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
+						   "  <d:sync-token>%s</d:sync-token>"
+						   "  <d:sync-level>infinite</d:sync-level>"
+						   "  <d:prop/>" // dav:prop always required by sabredav
+						   "</d:sync-collection>",
+						   rc->sync_token);
+
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, sc->report_req->str);
 
 	sc->report_resp = g_string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, sc->report_resp);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
 
-	async_curl_add_request(curl, sync_done, sc);
+	async_curl_add_request(curl, sync_collection_report_done, sc);
 }
 
 static void finalize(GObject* gobject)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(gobject);
+	free(rc->sync_token);
 	free_events(rc);
-	free(rc->url);
 	G_OBJECT_CLASS(caldav_calendar_parent_class)->finalize(gobject);
 }
 
@@ -489,19 +727,20 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
-Calendar* caldav_calendar_new(const char* url, const char* username, const char* password)
+Calendar* caldav_calendar_new(const CalendarConfig* cfg)
 {
 	CaldavCalendar* rc = g_object_new(CALDAV_CALENDAR_TYPE, NULL);
-	rc->url = strdup(url);
+	// url must end with a slash. TODO don't assert
+	g_assert_true(strrchr(cfg->d.caldav.url, '/')[1] == 0);
+	rc->cfg = cfg;
 	rc->events = NULL;
-	// TODO cfg is not set yet, but this is not yet useful
-	//query_displayname(rc);
+	rc->sync_token = g_strdup("");
 	return (Calendar*) rc;
 }
 
 void caldav_calendar_free(CaldavCalendar* rc)
 {
-	free(rc->url);
+	free(rc->sync_token);
 	free_events(rc);
 	g_free(rc);
 }

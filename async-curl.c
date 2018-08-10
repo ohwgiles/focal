@@ -71,10 +71,9 @@ static gboolean on_socket_event(gint fd, GIOCondition condition, gpointer user_d
 
 static int on_modify_socket(CURL* e, curl_socket_t s, int what, void* cbp, void* sockp)
 {
-	guint p = (guint)(intptr_t) sockp;
-
+	intptr_t p = (intptr_t) sockp;
 	if (what == CURL_POLL_REMOVE) {
-		g_source_remove(p);
+		g_source_remove((guint) p);
 	} else {
 		GIOCondition cond = 0;
 		if (what & CURL_POLL_IN)
@@ -84,9 +83,9 @@ static int on_modify_socket(CURL* e, curl_socket_t s, int what, void* cbp, void*
 
 		if (!p) {
 			p = g_unix_fd_add(s, cond, on_socket_event, multi);
-			curl_multi_assign(multi, s, (void*) (intptr_t) p);
+			curl_multi_assign(multi, s, (void*) p);
 		} else {
-			GSource* src = g_main_context_find_source_by_id(NULL, p);
+			GSource* src = g_main_context_find_source_by_id(NULL, (guint) p);
 			GUnixFDSource* usrc = (GUnixFDSource*) src;
 			g_source_modify_unix_fd(src, usrc->tag, cond);
 		}
@@ -96,7 +95,7 @@ static int on_modify_socket(CURL* e, curl_socket_t s, int what, void* cbp, void*
 
 static gboolean on_timer_event(gpointer user_data)
 {
-	int running;
+	int running = 0;
 	curl_multi_socket_action(user_data, CURL_SOCKET_TIMEOUT, 0, &running);
 	return FALSE;
 }
