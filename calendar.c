@@ -23,6 +23,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
 
 enum {
 	SIGNAL_SYNC_DONE,
+	SIGNAL_REQUEST_PASSWORD,
 	LAST_SIGNAL
 };
 
@@ -57,6 +58,8 @@ void calendar_class_init(CalendarClass* klass)
 {
 	GObjectClass* goc = (GObjectClass*) klass;
 	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	// TODO: learn how to use G_TYPE_STRING in return value properly...
+	calendar_signals[SIGNAL_REQUEST_PASSWORD] = g_signal_new("request-password", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 void calendar_init(Calendar* self)

@@ -22,7 +22,6 @@ void calendar_config_free(CalendarConfig* cfg)
 	case CAL_TYPE_CALDAV:
 		free(cfg->d.caldav.url);
 		free(cfg->d.caldav.user);
-		free(cfg->d.caldav.pass);
 		break;
 	case CAL_TYPE_FILE:
 		free(cfg->d.file.path);
@@ -59,7 +58,6 @@ GSList* calendar_config_load_from_file(const char* config_file)
 			cfg->type = CAL_TYPE_CALDAV;
 			cfg->d.caldav.url = g_key_file_get_string(keyfile, groups[i], "url", NULL);
 			cfg->d.caldav.user = g_key_file_get_string(keyfile, groups[i], "user", NULL);
-			cfg->d.caldav.pass = g_key_file_get_string(keyfile, groups[i], "pass", NULL);
 		} else if (g_strcmp0(type, "file") == 0) {
 			cfg->type = CAL_TYPE_FILE;
 			cfg->d.file.path = g_key_file_get_string(keyfile, groups[i], "path", NULL);
@@ -91,7 +89,6 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 			g_key_file_set_string(keyfile, cfg->name, "type", "caldav");
 			g_key_file_set_string(keyfile, cfg->name, "url", cfg->d.caldav.url);
 			g_key_file_set_string(keyfile, cfg->name, "user", cfg->d.caldav.user);
-			g_key_file_set_string(keyfile, cfg->name, "pass", cfg->d.caldav.pass);
 			break;
 		case CAL_TYPE_FILE:
 			g_key_file_set_string(keyfile, cfg->name, "type", "file");

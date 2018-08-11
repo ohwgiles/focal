@@ -23,7 +23,6 @@ struct _AccountEditDialog {
 	GtkWidget* file_path;
 	GtkWidget* caldav_url;
 	GtkWidget* caldav_user;
-	GtkWidget* caldav_pass;
 	CalendarConfig* config;
 };
 G_DEFINE_TYPE(AccountEditDialog, account_edit_dialog, GTK_TYPE_DIALOG);
@@ -37,13 +36,10 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 	case CAL_TYPE_CALDAV:
 		dialog->caldav_url = gtk_entry_new();
 		dialog->caldav_user = gtk_entry_new();
-		dialog->caldav_pass = gtk_entry_new();
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("URL"), 0, 3, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->caldav_url, 1, 3, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("Username"), 0, 4, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->caldav_user, 1, 4, 1, 1);
-		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("Password"), 0, 5, 1, 1);
-		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->caldav_pass, 1, 5, 1, 1);
 		break;
 	case CAL_TYPE_FILE:
 		dialog->file_path = gtk_entry_new();
@@ -62,7 +58,6 @@ static void populate_fields(AccountEditDialog* dialog)
 	case CAL_TYPE_CALDAV:
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url)), dialog->config->d.caldav.url, -1);
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user)), dialog->config->d.caldav.user, -1);
-		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_pass)), dialog->config->d.caldav.pass, -1);
 		break;
 	case CAL_TYPE_FILE:
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->d.file.path, -1);
@@ -85,7 +80,6 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 		case CAL_TYPE_CALDAV:
 			free(dialog->config->d.caldav.url);
 			free(dialog->config->d.caldav.user);
-			free(dialog->config->d.caldav.pass);
 			break;
 		case CAL_TYPE_FILE:
 			free(dialog->config->d.file.path);
@@ -98,7 +92,6 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 		case CAL_TYPE_CALDAV:
 			dialog->config->d.caldav.url = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
 			dialog->config->d.caldav.user = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
-			dialog->config->d.caldav.pass = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_pass))));
 			break;
 		case CAL_TYPE_FILE:
 			dialog->config->d.file.path = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));

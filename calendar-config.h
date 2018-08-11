@@ -35,7 +35,6 @@ typedef struct {
 		struct {
 			gchar* url;
 			gchar* user;
-			gchar* pass;
 		} caldav;
 	} d;
 } CalendarConfig;

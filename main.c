@@ -122,7 +122,6 @@ static void event_delete(EventPanel* event_panel, Calendar* cal, icalcomponent* 
 {
 	// TODO "are you sure?" popup
 	calendar_delete_event(FOCAL_CALENDAR(cal), ev);
-	week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
 static void event_save(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
@@ -166,12 +165,45 @@ static void calendar_synced(FocalMain* fm, Calendar* cal)
 	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 }
 
+static char* calendar_request_password(FocalMain* fm, const char* account_name, const char* user)
+{
+	GtkWidget* dialog = gtk_dialog_new_with_buttons("Focal", GTK_WINDOW(fm->mainWindow), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_OK", GTK_RESPONSE_OK, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
+	GtkEntryBuffer* buffer = gtk_entry_buffer_new("", 0);
+
+	GtkWidget* grid = gtk_grid_new();
+	g_object_set(grid, "column-spacing", 12, "row-spacing", 9, "margin-bottom", 12, "margin-top", 12, NULL);
+	gtk_grid_attach(GTK_GRID(grid), gtk_image_new_from_icon_name("dialog-password-symbolic", GTK_ICON_SIZE_DIALOG), 0, 0, 1, 4);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "<b>This operation requires your password</b>", "use-markup", TRUE, NULL), 1, 0, 2, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Account:", "halign", GTK_ALIGN_END, NULL), 1, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", account_name, "halign", GTK_ALIGN_START, NULL), 2, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Username:", "halign", GTK_ALIGN_END, NULL), 1, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", user, "halign", GTK_ALIGN_START, NULL), 2, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Password:", "halign", GTK_ALIGN_END, NULL), 1, 3, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_ENTRY, "buffer", buffer, "input-purpose", GTK_INPUT_PURPOSE_PASSWORD, "visibility", FALSE, "halign", GTK_ALIGN_START, NULL), 2, 3, 1, 1);
+
+	GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	g_object_set(content, "margin", 6, NULL);
+	gtk_container_add(GTK_CONTAINER(content), grid);
+	gtk_widget_show_all(dialog);
+
+	int ret = gtk_dialog_run(GTK_DIALOG(dialog));
+	char* res = NULL;
+	if (ret == GTK_RESPONSE_OK) {
+		res = g_strdup(gtk_entry_buffer_get_text(buffer));
+	}
+	gtk_widget_destroy(dialog);
+	g_object_unref(buffer);
+
+	return res;
+}
+
 static void create_calendars(FocalMain* fm)
 {
 	for (GSList* p = fm->config; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
+		g_signal_connect_swapped(cal, "request-password", (GCallback) calendar_request_password, fm);
 		fm->calendars = g_slist_append(fm->calendars, cal);
 		calendar_sync(cal);
 	}

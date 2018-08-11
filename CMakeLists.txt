@@ -26,6 +26,10 @@ add_definitions(${LIBXML2_DEFINITIONS})
 pkg_check_modules(ICAL REQUIRED libical)
 include_directories(${ICAL_INCLUDE_DIRS})
 
+# libsecret
+pkg_check_modules(LIBSECRET REQUIRED libsecret-1)
+include_directories(${LIBSECRET_INCLUDE_DIRS})
+
 # executable
 add_executable(${PROJECT_NAME}
 	accounts-dialog.c
@@ -46,4 +50,5 @@ target_link_libraries(${PROJECT_NAME}
 	${LIBXML2_LIBRARIES}
 	${CURL_LIBRARIES}
 	${ICAL_LIBRARIES}
+	${LIBSECRET_LIBRARIES}
 )
