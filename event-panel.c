@@ -56,9 +56,6 @@ static void attendee_layout_relayout(GtkWidget* layout, GdkRectangle* allocation
 struct _EventPanel {
 	GtkBox parent;
 	GtkEntryBuffer* event_label;
-	GtkWidget* save_button;
-	GtkWidget* delete_button;
-	GtkWidget* cancel_button;
 
 	GtkWidget* starts_at;
 	GtkWidget* duration;
@@ -86,6 +83,46 @@ static void event_panel_class_init(EventPanelClass* klass)
 
 static void event_panel_init(EventPanel* self)
 {
+}
+
+static gboolean set_participation_status(icalcomponent* ev, const char* participant_email, icalparameter_partstat status)
+{
+	if (!participant_email)
+		return FALSE;
+	for (icalproperty* attendee = icalcomponent_get_first_property(ev, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ev, ICAL_ATTENDEE_PROPERTY)) {
+		const char* cal_addr = icalproperty_get_attendee(attendee);
+		if (strncasecmp(cal_addr, "mailto:", 7) == 0 && strcasecmp(&cal_addr[7], participant_email) == 0) {
+			icalparameter* partstat = icalproperty_get_first_parameter(attendee, ICAL_PARTSTAT_PARAMETER);
+			;
+			if (partstat) {
+				icalparameter_set_partstat(partstat, status);
+				return TRUE;
+			}
+			break;
+		}
+	}
+	return FALSE;
+}
+
+static void rsvp_yes_clicked(GtkButton* button, gpointer user_data)
+{
+	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
+	if (set_participation_status(ew->selected_event, calendar_get_email(ew->selected_event_calendar), ICAL_PARTSTAT_ACCEPTED))
+		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event_calendar, ew->selected_event);
+}
+
+static void rsvp_maybe_clicked(GtkButton* button, gpointer user_data)
+{
+	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
+	if (set_participation_status(ew->selected_event, calendar_get_email(ew->selected_event_calendar), ICAL_PARTSTAT_TENTATIVE))
+		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event_calendar, ew->selected_event);
+}
+
+static void rsvp_no_clicked(GtkButton* button, gpointer user_data)
+{
+	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
+	if (set_participation_status(ew->selected_event, calendar_get_email(ew->selected_event_calendar), ICAL_PARTSTAT_DECLINED))
+		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event_calendar, ew->selected_event);
 }
 
 static void delete_clicked(GtkButton* button, gpointer user_data)
@@ -170,23 +207,13 @@ void spin_insert_text(GtkEditable* editable, gchar* text, gint len, gpointer pos
 GtkWidget* event_panel_new()
 {
 	EventPanel* e = g_object_new(FOCAL_TYPE_EVENT_PANEL, "orientation", GTK_ORIENTATION_VERTICAL, NULL);
-	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) e), GTK_STYLE_CLASS_BACKGROUND);
 	GtkWidget* bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
+	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) bar), GTK_STYLE_CLASS_TITLEBAR);
 
 	e->event_label = gtk_entry_buffer_new("", 0);
-	GtkWidget* event_title = gtk_entry_new_with_buffer(e->event_label);
+	GtkWidget* event_title = g_object_new(GTK_TYPE_ENTRY, "buffer", e->event_label, "hexpand", TRUE, NULL);
 	gtk_entry_set_has_frame(GTK_ENTRY(event_title), FALSE);
-	gtk_action_bar_set_center_widget(GTK_ACTION_BAR(bar), event_title);
-
-	e->delete_button = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(e->delete_button), gtk_image_new_from_icon_name("edit-delete", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	g_signal_connect(e->delete_button, "clicked", (GCallback) &delete_clicked, e);
-	gtk_action_bar_pack_end(GTK_ACTION_BAR(bar), e->delete_button);
-
-	e->save_button = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(e->save_button), gtk_image_new_from_icon_name("gtk-save", GTK_ICON_SIZE_LARGE_TOOLBAR));
-	g_signal_connect(e->save_button, "clicked", (GCallback) &save_clicked, e);
-	gtk_action_bar_pack_start(GTK_ACTION_BAR(bar), e->save_button);
+	gtk_container_add(GTK_CONTAINER(bar), event_title);
 
 	GtkWidget* grid = gtk_grid_new();
 	g_object_set(grid, "margin", 5, NULL);
@@ -238,8 +265,37 @@ GtkWidget* event_panel_new()
 
 	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 2, 4, 1);
 
+	GtkWidget* actions = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
+
+	GtkWidget* btn;
+	btn = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("emblem-ok-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	g_signal_connect(btn, "clicked", (GCallback) &rsvp_yes_clicked, e);
+	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
+
+	btn = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-question-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	g_signal_connect(btn, "clicked", (GCallback) &rsvp_maybe_clicked, e);
+	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
+
+	btn = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-error-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	g_signal_connect(btn, "clicked", (GCallback) &rsvp_no_clicked, e);
+	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
+
+	btn = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("edit-delete-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	g_signal_connect(btn, "clicked", (GCallback) &delete_clicked, e);
+	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), btn);
+
+	btn = gtk_button_new();
+	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("document-save-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
+	g_signal_connect(btn, "clicked", (GCallback) &save_clicked, e);
+	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), btn);
+
 	gtk_box_pack_start(GTK_BOX(e), bar, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(e), grid, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(e), actions, TRUE, TRUE, 0);
 	return (GtkWidget*) e;
 }
 
