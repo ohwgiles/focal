@@ -32,17 +32,17 @@ include_directories(${LIBSECRET_INCLUDE_DIRS})
 
 # executable
 add_executable(${PROJECT_NAME}
-	accounts-dialog.c
-	account-edit-dialog.c
-	async-curl.c
-	caldav-calendar.c
-	calendar-config.c
-	calendar.c
-	event-panel.c
-	event-private.c
-	local-calendar.c
-	main.c
-	week-view.c
+	src/accounts-dialog.c
+	src/account-edit-dialog.c
+	src/async-curl.c
+	src/caldav-calendar.c
+	src/calendar-config.c
+	src/calendar.c
+	src/event-panel.c
+	src/event-private.c
+	src/local-calendar.c
+	src/main.c
+	src/week-view.c
 )
 
 target_link_libraries(${PROJECT_NAME}
