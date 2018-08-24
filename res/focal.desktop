@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Focal
+Comment=Manage local and remote calendars
+Exec=focal %f
+Terminal=false
+Icon=x-office-calendar
+Type=Application
+Categories=Calendar;Office;
+MimeType=text/calendar;

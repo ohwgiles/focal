@@ -52,3 +52,6 @@ target_link_libraries(${PROJECT_NAME}
 	${ICAL_LIBRARIES}
 	${LIBSECRET_LIBRARIES}
 )
+
+install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)
+install(FILES res/focal.desktop DESTINATION share/applications)
