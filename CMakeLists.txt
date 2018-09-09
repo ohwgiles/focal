@@ -38,6 +38,8 @@ add_executable(${PROJECT_NAME}
 	src/caldav-calendar.c
 	src/calendar-config.c
 	src/calendar.c
+	src/cell-renderer-attendee-action.c
+	src/cell-renderer-attendee-partstat.c
 	src/event-panel.c
 	src/event-private.c
 	src/local-calendar.c

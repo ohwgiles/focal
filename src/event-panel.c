@@ -14,44 +14,9 @@
 #include <ctype.h>
 
 #include "calendar.h"
+#include "cell-renderer-attendee-action.h"
+#include "cell-renderer-attendee-partstat.h"
 #include "event-panel.h"
-
-typedef struct {
-	GtkWidget* layout;
-	int width;
-	int cheight; // child element height
-	int cx, cy;  // coordinates of current child label
-} AttendeeLayout;
-
-static void attendee_layout_clear(AttendeeLayout* al)
-{
-	gtk_container_foreach(GTK_CONTAINER(al->layout), (GtkCallback) gtk_widget_destroy, NULL);
-}
-
-static void attendee_layout_add(AttendeeLayout* al, const char* name)
-{
-	gtk_container_add(GTK_CONTAINER(al->layout), gtk_label_new(name));
-}
-
-static void attendee_layout_relayout_child(GtkWidget* child, AttendeeLayout* al)
-{
-	int cwidth;
-	gtk_widget_get_preferred_width_for_height(child, al->cheight, NULL, &cwidth);
-	if (al->cx + cwidth > al->width) {
-		al->cy += al->cheight;
-		al->cx = 0;
-	}
-	gtk_layout_move(GTK_LAYOUT(al->layout), child, al->cx, al->cy);
-	al->cx += cwidth;
-}
-
-static void attendee_layout_relayout(GtkWidget* layout, GdkRectangle* allocation, AttendeeLayout* al)
-{
-	al->cx = 0;
-	al->cy = 0;
-	al->width = allocation->width;
-	gtk_container_foreach(GTK_CONTAINER(layout), (GtkCallback) attendee_layout_relayout_child, al);
-}
 
 struct _EventPanel {
 	GtkBox parent;
@@ -60,7 +25,8 @@ struct _EventPanel {
 	GtkWidget* starts_at;
 	GtkWidget* duration;
 	GtkTextBuffer* description;
-	AttendeeLayout attendees;
+	GtkWidget* attendees_view;
+	GtkListStore* attendees_model;
 
 	Calendar* selected_event_calendar;
 	icalcomponent* selected_event;
@@ -85,6 +51,49 @@ static void event_panel_init(EventPanel* self)
 {
 }
 
+static void populate_attendees(GtkListStore* model, icalcomponent* ev)
+{
+	GtkTreeIter iter;
+	for (icalproperty* attendee = icalcomponent_get_first_property(ev, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ev, ICAL_ATTENDEE_PROPERTY)) {
+
+		gtk_list_store_append(model, &iter);
+		icalparameter* partstat = icalproperty_get_first_parameter(attendee, ICAL_PARTSTAT_PARAMETER);
+		gtk_list_store_set(model, &iter,
+						   0, partstat ? icalparameter_get_partstat(partstat) : ICAL_PARTSTAT_NONE,
+						   1, icalproperty_get_attendee(attendee),
+						   2, attendee,
+						   3, FALSE,
+						   -1);
+	}
+	// empty entry for adding an attendee
+	gtk_list_store_append(model, &iter);
+	gtk_list_store_set(model, &iter, 3, TRUE, -1);
+}
+
+void on_attendee_added(EventPanel* self, gchar* path, gchar* new_text, GtkCellRendererText* cell_renderer)
+{
+	icalproperty* attendee = icalproperty_new_attendee(new_text);
+	icalcomponent_add_property(self->selected_event, attendee);
+	gtk_list_store_clear(self->attendees_model);
+	populate_attendees(self->attendees_model, self->selected_event);
+}
+
+static void on_attendee_action(EventPanel* self, icalproperty* attendee)
+{
+	// a valid attendee means un-invite, NULL means a new one should be added
+	if (attendee) {
+		icalcomponent_remove_property(self->selected_event, attendee);
+		populate_attendees(self->attendees_model, self->selected_event);
+	} else {
+		// The plus button just focuses the combo box (otherwise it is invisible)
+		gint n_rows = gtk_tree_model_iter_n_children(GTK_TREE_MODEL(self->attendees_model), NULL);
+		GtkTreePath* path = gtk_tree_path_new_from_indices(n_rows - 1, -1);
+		// TODO this doesn't properly focus the combo box editor :(
+		gtk_tree_view_set_cursor_on_cell(GTK_TREE_VIEW(self->attendees_view), path, gtk_tree_view_get_column(GTK_TREE_VIEW(self->attendees_view), 1), NULL, TRUE);
+		gtk_widget_grab_focus(self->attendees_view);
+	}
+}
+
 static gboolean set_participation_status(icalcomponent* ev, const char* participant_email, icalparameter_partstat status)
 {
 	if (!participant_email)
@@ -93,11 +102,11 @@ static gboolean set_participation_status(icalcomponent* ev, const char* particip
 		const char* cal_addr = icalproperty_get_attendee(attendee);
 		if (strncasecmp(cal_addr, "mailto:", 7) == 0 && strcasecmp(&cal_addr[7], participant_email) == 0) {
 			icalparameter* partstat = icalproperty_get_first_parameter(attendee, ICAL_PARTSTAT_PARAMETER);
-			;
-			if (partstat) {
-				icalparameter_set_partstat(partstat, status);
-				return TRUE;
+			if (!partstat) {
+				partstat = icalparameter_new(ICAL_PARTSTAT_PARAMETER);
+				icalproperty_add_parameter(attendee, partstat);
 			}
+			icalparameter_set_partstat(partstat, status);
 			break;
 		}
 	}
@@ -256,10 +265,25 @@ GtkWidget* event_panel_new()
 	gtk_scrolled_window_set_min_content_height(GTK_SCROLLED_WINDOW(attendees_scrolled), 80);
 	gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(attendees_scrolled), 100);
 
-	e->attendees.layout = gtk_layout_new(NULL, NULL);
-	e->attendees.cheight = 20; // TODO: base on actual widget size
-	g_signal_connect(G_OBJECT(e->attendees.layout), "size-allocate", G_CALLBACK(attendee_layout_relayout), &e->attendees);
-	gtk_container_add(GTK_CONTAINER(attendees_scrolled), e->attendees.layout);
+	e->attendees_model = gtk_list_store_new(4, G_TYPE_INT, G_TYPE_STRING, G_TYPE_POINTER, G_TYPE_BOOLEAN);
+	e->attendees_view = gtk_tree_view_new_with_model(GTK_TREE_MODEL(e->attendees_model));
+
+	GtkCellRenderer* cell_renderer = cell_renderer_attendee_partstat_new();
+	gtk_tree_view_append_column(GTK_TREE_VIEW(e->attendees_view), gtk_tree_view_column_new_with_attributes(NULL, cell_renderer, "partstat", 0, NULL));
+	cell_renderer = gtk_cell_renderer_combo_new();
+	// TODO: set model property with colleague list
+	g_object_set(cell_renderer, "text-column", 1, "editable", TRUE, NULL);
+	g_signal_connect_swapped(cell_renderer, "edited", (GCallback) on_attendee_added, e);
+	GtkTreeViewColumn* col = gtk_tree_view_column_new_with_attributes(NULL, cell_renderer, "text", 1, "has-entry", 3, NULL);
+	gtk_tree_view_column_set_expand(col, TRUE);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(e->attendees_view), col);
+	cell_renderer = cell_renderer_attendee_action_new();
+	g_signal_connect_swapped(cell_renderer, "activated", (GCallback) on_attendee_action, e);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(e->attendees_view), gtk_tree_view_column_new_with_attributes(NULL, cell_renderer, "attendee", 2, NULL));
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(e->attendees_view), FALSE);
+	gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(e->attendees_view)), GTK_SELECTION_NONE);
+
+	gtk_container_add(GTK_CONTAINER(attendees_scrolled), e->attendees_view);
 
 	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 0, 1, 4, 1);
 
@@ -301,7 +325,7 @@ GtkWidget* event_panel_new()
 
 void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 {
-	attendee_layout_clear(&ew->attendees);
+	gtk_list_store_clear(ew->attendees_model);
 	if (ev) {
 		gtk_entry_buffer_set_text(ew->event_label, icalcomponent_get_summary(ev), -1);
 
@@ -314,15 +338,8 @@ void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev)
 		gtk_spin_button_set_value(GTK_SPIN_BUTTON(ew->duration), dur.minutes + dur.hours * 60);
 
 		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), icalcomponent_get_description(ev), -1);
-		for (icalproperty* attendee = icalcomponent_get_first_property(ev, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ev, ICAL_ATTENDEE_PROPERTY)) {
-			attendee_layout_add(&ew->attendees, icalproperty_get_parameter_as_string(attendee, "CN"));
-		}
-		gtk_widget_show_all(ew->attendees.layout);
-		if (gtk_widget_get_realized(ew->attendees.layout)) {
-			GtkAllocation alloc;
-			gtk_widget_get_allocation(ew->attendees.layout, &alloc);
-			attendee_layout_relayout(ew->attendees.layout, &alloc, &ew->attendees);
-		}
+
+		populate_attendees(ew->attendees_model, ev);
 	}
 	ew->selected_event = ev;
 	ew->selected_event_calendar = cal;
