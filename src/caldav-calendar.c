@@ -638,7 +638,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 				}
 				// Since a match was found and dealt with, remove this entry from the list
 				gpointer next = (*n)->next;
-				g_free(*n);
+				g_slist_free_1(*n);
 				*n = next;
 				// break & continue,
 				goto sync_populate_local_list_event_matched;
