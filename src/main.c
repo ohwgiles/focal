@@ -15,7 +15,6 @@
 #include "async-curl.h"
 #include "calendar-config.h"
 #include "event-panel.h"
-#include "event-private.h"
 #include "week-view.h"
 
 #include <curl/curl.h>
@@ -33,60 +32,35 @@ typedef struct {
 	GtkWidget* eventDetail;
 } FocalMain;
 
-static char* icc_read_stream(char* s, size_t sz, void* ud)
+static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* calendars)
 {
-	return fgets(s, sz, (FILE*) ud);
-}
-
-static icalcomponent* icalcomponent_from_file(const char* path)
-{
-	FILE* stream = fopen(path, "r");
-	if (!stream)
-		return NULL;
-
-	icalcomponent* c;
-	char* line;
-	icalparser* parser = icalparser_new();
-	icalparser_set_gen_data(parser, stream);
-	do {
-		line = icalparser_get_line(parser, &icc_read_stream);
-		c = icalparser_add_line(parser, line);
-		if (c)
-			return c;
-	} while (line);
-	return NULL;
-}
-
-static void focal_add_event(FocalMain* focal, icalcomponent* ev)
-{
-	Calendar* cal = NULL;
-	icalparameter* partstat = NULL;
-
-	for (icalproperty* attendees = icalcomponent_get_first_property(ev, ICAL_ATTENDEE_PROPERTY); attendees; attendees = icalcomponent_get_next_property(ev, ICAL_ATTENDEE_PROPERTY)) {
-		const char* cal_addr = icalproperty_get_attendee(attendees);
-		if (strncasecmp(cal_addr, "mailto:", 7) != 0)
-			continue;
-		cal_addr = &cal_addr[7];
-		// check each known Calendar for matching address
-		for (GSList* c = focal->calendars; c; c = c->next) {
-			const char* email = calendar_get_email(FOCAL_CALENDAR(c->data));
-			if (email && strcasecmp(email, cal_addr) == 0) {
-				cal = FOCAL_CALENDAR(c->data);
-				partstat = icalproperty_get_first_parameter(attendees, ICAL_PARTSTAT_PARAMETER);
-				// TODO what is the effect of this on common caldav servers?
-				icalproperty_remove_parameter_by_kind(attendees, ICAL_RSVP_PARAMETER);
-				// break from both loops
-				attendees = NULL;
-				break;
-			}
+	const char* cal_addr = icalproperty_get_attendee(attendee);
+	if (strncasecmp(cal_addr, "mailto:", 7) != 0)
+		return;
+	cal_addr = &cal_addr[7];
+	// check each known Calendar for matching address
+	for (GSList* c = calendars; c; c = c->next) {
+		const char* email = calendar_get_email(FOCAL_CALENDAR(c->data));
+		if (email && strcasecmp(email, cal_addr) == 0) {
+			event_set_calendar(ev, FOCAL_CALENDAR(c->data));
+			// TODO: consider implementing an early break from event_each_attendee
+			return;
 		}
 	}
+}
 
+static void focal_add_event(FocalMain* focal, Event* ev)
+{
+	event_each_attendee(ev, match_event_to_calendar, focal->calendars);
+
+	Calendar* cal = event_get_calendar(ev);
 	// TODO allow selecting a calendar in the dialog
-	if (!cal)
+	if (!cal) {
 		cal = FOCAL_CALENDAR(focal->calendars->data);
+		event_set_calendar(ev, cal);
+	}
 
-	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), cal, ev);
+	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 
 	GtkWidget* dialog;
 	dialog = gtk_message_dialog_new(GTK_WINDOW(focal->mainWindow),
@@ -94,43 +68,34 @@ static void focal_add_event(FocalMain* focal, icalcomponent* ev)
 									GTK_MESSAGE_ERROR,
 									GTK_BUTTONS_YES_NO,
 									"Add event \"%s\" to calendar?",
-									icalcomponent_get_summary(ev));
+									event_get_summary(ev));
 	int resp = gtk_dialog_run(GTK_DIALOG(dialog));
 	if (resp == GTK_RESPONSE_YES) {
-		// TODO allow selecting a different response
-		if (partstat) {
-			icalparameter_set_partstat(partstat, ICAL_PARTSTAT_ACCEPTED);
-		}
-
-		calendar_add_event(cal, ev);
+		calendar_save_event(cal, ev);
 	} else {
 		week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 	}
 	gtk_widget_destroy(dialog);
 }
 
-static void cal_event_selected(WeekView* widget, Calendar* cal, icalcomponent* ev, GdkRectangle* rect, FocalMain* fm)
+static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalMain* fm)
 {
 	if (ev) {
 		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
-		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), cal, ev);
+		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), ev);
 		gtk_popover_popup(GTK_POPOVER(fm->popover));
 	}
 }
 
-static void event_delete(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
+static void event_delete(EventPanel* event_panel, Event* ev, FocalMain* focal)
 {
 	// TODO "are you sure?" popup
-	calendar_delete_event(FOCAL_CALENDAR(cal), ev);
+	calendar_delete_event(FOCAL_CALENDAR(event_get_calendar(ev)), ev);
 }
 
-static void event_save(EventPanel* event_panel, Calendar* cal, icalcomponent* ev, FocalMain* focal)
+static void on_event_save(EventPanel* event_panel, Event* ev, FocalMain* focal)
 {
-	if (icalcomponent_has_private(ev)) {
-		calendar_update_event(FOCAL_CALENDAR(cal), ev);
-	} else {
-		calendar_add_event(FOCAL_CALENDAR(cal), ev);
-	}
+	event_save(ev);
 	// needed in case the time, duration or summary changed
 	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
@@ -319,7 +284,7 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 
 	g_signal_connect(fm->weekView, "event-selected", (GCallback) &cal_event_selected, fm);
 	g_signal_connect(fm->eventDetail, "cal-event-delete", (GCallback) &event_delete, fm);
-	g_signal_connect(fm->eventDetail, "cal-event-save", (GCallback) &event_save, fm);
+	g_signal_connect(fm->eventDetail, "cal-event-save", (GCallback) &on_event_save, fm);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
@@ -393,12 +358,9 @@ static void focal_open(GApplication* app, GFile** files, gint n_files, gchar* hi
 	if (!fm->mainWindow)
 		focal_create_main_window(app, fm);
 	for (int i = 0; i < n_files; ++i) {
-		icalcomponent* c = icalcomponent_from_file(g_file_get_path(files[i]));
-		if (c) {
-			icalcomponent* vev = icalcomponent_get_first_real_component(c);
-			if (vev) {
-				focal_add_event(fm, vev);
-			}
+		Event* e = event_new_from_ics_file(g_file_get_path(files[i]));
+		if (e) {
+			focal_add_event(fm, e);
 		}
 	}
 }

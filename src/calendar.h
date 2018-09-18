@@ -14,30 +14,27 @@
 #ifndef CALENDAR_H
 #define CALENDAR_H
 
+#include "event.h"
 #include <gtk/gtk.h>
-#include <libical/ical.h>
 
 #include "calendar-config.h"
 
 #define TYPE_CALENDAR (calendar_get_type())
 G_DECLARE_DERIVABLE_TYPE(Calendar, calendar, FOCAL, CALENDAR, GObject)
 
-typedef void (*CalendarEachEventCallback)(void* user, Calendar*, icalcomponent*);
+typedef void (*CalendarEachEventCallback)(void* user, Event*);
 
 struct _CalendarClass {
 	GObjectClass parent;
-	void (*add_event)(Calendar*, icalcomponent* event);
-	void (*update_event)(Calendar*, icalcomponent* event);
-	void (*delete_event)(Calendar*, icalcomponent* event);
+	void (*save_event)(Calendar*, Event* event);
+	void (*delete_event)(Calendar*, Event* event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
 	void (*sync)(Calendar*);
 };
 
-void calendar_add_event(Calendar* self, icalcomponent* event);
+void calendar_save_event(Calendar* self, Event* event);
 
-void calendar_update_event(Calendar* self, icalcomponent* event);
-
-void calendar_delete_event(Calendar* self, icalcomponent* event);
+void calendar_delete_event(Calendar* self, Event* event);
 
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
 

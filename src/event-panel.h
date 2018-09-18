@@ -15,7 +15,6 @@
 #define EVENT_PANEL_H
 
 #include <gtk/gtk.h>
-#include <libical/ical.h>
 
 #include "calendar.h"
 
@@ -24,6 +23,6 @@ G_DECLARE_FINAL_TYPE(EventPanel, event_panel, FOCAL, EVENT_PANEL, GtkBox)
 
 GtkWidget* event_panel_new();
 
-void event_panel_set_event(EventPanel* ew, Calendar* cal, icalcomponent* ev);
+void event_panel_set_event(EventPanel* ew, Event* ev);
 
 #endif //EVENT_PANEL_H

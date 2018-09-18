@@ -41,7 +41,7 @@ add_executable(${PROJECT_NAME}
 	src/cell-renderer-attendee-action.c
 	src/cell-renderer-attendee-partstat.c
 	src/event-panel.c
-	src/event-private.c
+	src/event.c
 	src/local-calendar.c
 	src/main.c
 	src/week-view.c

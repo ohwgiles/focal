@@ -29,17 +29,12 @@ enum {
 
 static gint calendar_signals[LAST_SIGNAL] = {0};
 
-void calendar_add_event(Calendar* self, icalcomponent* event)
+void calendar_save_event(Calendar* self, Event* event)
 {
-	FOCAL_CALENDAR_GET_CLASS(self)->add_event(self, event);
+	FOCAL_CALENDAR_GET_CLASS(self)->save_event(self, event);
 }
 
-void calendar_update_event(Calendar* self, icalcomponent* event)
-{
-	FOCAL_CALENDAR_GET_CLASS(self)->update_event(self, event);
-}
-
-void calendar_delete_event(Calendar* self, icalcomponent* event)
+void calendar_delete_event(Calendar* self, Event* event)
 {
 	FOCAL_CALENDAR_GET_CLASS(self)->delete_event(self, event);
 }

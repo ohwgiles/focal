@@ -17,7 +17,6 @@
 
 #include "async-curl.h"
 #include "caldav-calendar.h"
-#include "event-private.h"
 
 struct _CaldavCalendar {
 	Calendar parent;
@@ -216,23 +215,6 @@ static size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* 
 	return size * nmemb;
 }
 
-static char* generate_ical_uid()
-{
-	char* buffer;
-	unsigned char uuid[16];
-	for (int i = 0; i < 16; ++i)
-		uuid[i] = (unsigned char) rand();
-	// according to rfc4122 section 4.4
-	uuid[8] = 0x80 | (uuid[8] & 0x5F);
-	uuid[7] = 0x40 | (uuid[7] & 0x0F);
-	asprintf(&buffer, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-			 uuid[0], uuid[1], uuid[2], uuid[3],
-			 uuid[4], uuid[5], uuid[6], uuid[7],
-			 uuid[8], uuid[9], uuid[10], uuid[11],
-			 uuid[12], uuid[13], uuid[14], uuid[15]);
-	return buffer;
-}
-
 /* Helper function for the common aspects of a CalDAV request */
 static CURL* new_curl_request(const CalendarConfig* cfg, const char* url, const char* pass)
 {
@@ -261,7 +243,6 @@ typedef struct {
 	void (*func)();
 	CaldavCalendar* cal;
 	void* arg1;
-	void* arg2;
 } DelayedFunctionContext;
 
 static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer user);
@@ -326,7 +307,7 @@ static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer u
 		}
 	} else {
 		rc->op_pending = FALSE;
-		(*dfc->func)(dfc->cal, password, dfc->arg1, dfc->arg2);
+		(*dfc->func)(dfc->cal, password, dfc->arg1);
 		secret_password_free(password);
 	}
 	free(dfc);
@@ -337,8 +318,8 @@ typedef struct {
 	char* url;
 	struct curl_slist* hdrs;
 	char* cal_postdata;
-	icalcomponent* old_event;
-	icalcomponent* new_event;
+	Event* old_event;
+	Event* new_event;
 } ModifyContext;
 
 static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
@@ -372,31 +353,39 @@ static size_t caldav_put_response_get_etag(char* ptr, size_t size, size_t nmemb,
 		char* etag = strdup(ptr + header_len);
 		// truncate CRLF
 		*strchrnul(etag, '\r') = 0;
-		icalcomponent_get_private((icalcomponent*) userdata)->etag = etag;
+		event_update_etag((Event*) userdata, etag);
 	}
 	return size * nmemb;
 }
 
-static void do_caldav_put(CaldavCalendar* rc, char* password, icalcomponent* event, icalcomponent* replaces)
+static void do_caldav_put(CaldavCalendar* rc, char* password, Event* event)
 {
-	EventPrivate* priv = icalcomponent_get_private(event);
-
 	ModifyContext* ac = g_new0(ModifyContext, 1);
 	ac->cal = rc;
-	ac->old_event = replaces;
 	ac->new_event = event;
-	const char* root_url = rc->cfg->d.caldav.url;
 
+	const char* root_url = rc->cfg->d.caldav.url;
+	const char* event_url = event_get_url(event);
+	if (event_url == NULL) {
+		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/'), event_get_uid(event)));
+		event_url = event_get_url(event);
+	}
+
+	// TODO cleaner?
 	const char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
-	asprintf(&ac->url, "%.*s%s", (int) (url_path - root_url), root_url, priv->url);
+	asprintf(&ac->url, "%.*s%s", (int) (url_path - root_url), root_url, event_get_url(event));
 
 	CURL* curl = new_curl_request(calendar_get_config(FOCAL_CALENDAR(rc)), ac->url, password);
 	ac->hdrs = curl_slist_append(ac->hdrs, "Content-Type: text/calendar; charset=utf-8");
 	ac->hdrs = curl_slist_append(ac->hdrs, "Expect:");
 
+	GSList* f = g_slist_find(rc->events, event);
+	if (f)
+		ac->old_event = f->data;
+
 	if (ac->old_event) {
 		char* match;
-		asprintf(&match, "If-Match: %s", icalcomponent_get_private(ac->old_event)->etag);
+		asprintf(&match, "If-Match: %s", event_get_etag(ac->old_event));
 		ac->hdrs = curl_slist_append(ac->hdrs, match);
 		free(match);
 	} else {
@@ -405,7 +394,7 @@ static void do_caldav_put(CaldavCalendar* rc, char* password, icalcomponent* eve
 
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
 	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ac->hdrs);
-	ac->cal_postdata = icalcomponent_as_ical_string(icalcomponent_get_parent(ac->new_event));
+	ac->cal_postdata = event_as_ical_string(ac->new_event);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ac->cal_postdata);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(ac->cal_postdata));
 
@@ -424,33 +413,10 @@ static void do_caldav_put(CaldavCalendar* rc, char* password, icalcomponent* eve
 		rc->op_pending = TRUE;                                                                 \
 	} while (0)
 
-static void add_event(Calendar* c, icalcomponent* event)
+static void save_event(Calendar* c, Event* event)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
-
-	EventPrivate* priv = icalcomponent_create_private(event);
-	const char* uid = icalcomponent_get_uid(event);
-	if (uid == NULL) {
-		char* p = generate_ical_uid();
-		icalcomponent_set_uid(event, p);
-		free(p);
-		uid = icalcomponent_get_uid(event);
-	}
-	const char* url_path = strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/');
-	asprintf(&priv->url, "%s%s.ics", url_path, icalcomponent_get_uid(event));
-	priv->cal = c;
-
-	icalcomponent* parent = icalcomponent_get_parent(event);
-	/* The event should have no parent if it was created here, or moved
-	 * from another calendar, but it might have one if created from an
-	 * invite file */
-	if (parent == NULL) {
-		parent = icalcomponent_new_vcalendar();
-		icalcomponent_add_property(parent, icalproperty_new_version("2.0"));
-		icalcomponent_add_property(parent, icalproperty_new_prodid("-//OHWG//FOCAL"));
-		icalcomponent_add_component(parent, event);
-	}
 
 	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
 	dfc->cal = rc;
@@ -460,62 +426,48 @@ static void add_event(Calendar* c, icalcomponent* event)
 	caldav_secret_lookup(rc, dfc);
 }
 
-static void update_event(Calendar* c, icalcomponent* event)
+static void do_delete_event(CaldavCalendar* rc, const char* password, Event* event)
 {
-	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
-	ENSURE_EXCLUSIVE(rc);
-
-	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
-	dfc->cal = rc;
-	dfc->func = do_caldav_put;
-	dfc->arg1 = event;
-	dfc->arg2 = event;
-
-	caldav_secret_lookup(rc, dfc);
-}
-
-static void do_delete_event(CaldavCalendar* rc, const char* password, icalcomponent* event)
-{
-	EventPrivate* priv = icalcomponent_get_private(event);
-
 	ModifyContext* pc = g_new0(ModifyContext, 1);
 	pc->cal = rc;
 	pc->old_event = event;
 	// TODO is this if stmt really needed?
 	const char* root_url = rc->cfg->d.caldav.url;
-	if (priv->url) {
-		char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
-		asprintf(&pc->url, "%.*s%s", (int) (url_path - root_url), root_url, priv->url);
-	} else {
-		asprintf(&pc->url, "%s%s.ics", root_url, icalcomponent_get_uid(event));
+	const char* event_url = event_get_url(event);
+	g_assert(event_url);
+	if (event_url == NULL) {
+		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/'), event_get_uid(event)));
+		event_url = event_get_url(event);
 	}
+
+	char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
+	asprintf(&pc->url, "%.*s%s", (int) (url_path - root_url), root_url, event_url);
 
 	CURL* curl = new_curl_request(rc->cfg, pc->url, password);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 
 	// set the If-Match header
 	char* match;
-	asprintf(&match, "If-Match: %s", priv->etag);
+	asprintf(&match, "If-Match: %s", event_get_etag(event));
 	pc->hdrs = curl_slist_append(pc->hdrs, match);
 	free(match);
 
 	async_curl_add_request(curl, caldav_modify_done, pc);
 }
 
-static void delete_event(Calendar* c, icalcomponent* event)
+static void delete_event(Calendar* c, Event* event)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
 
-	// if the component has no private data, it has never been added to this calendar
-	if (!icalcomponent_has_private(event))
+	// if the event has no etag, it has never been added to this calendar
+	if (!event_get_etag(event))
 		return;
 
 	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
 	dfc->cal = rc;
 	dfc->func = do_delete_event;
 	dfc->arg1 = event;
-	dfc->arg2 = event;
 
 	caldav_secret_lookup(rc, dfc);
 }
@@ -524,38 +476,29 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	for (GSList* p = rc->events; p; p = p->next) {
-		callback(user, (Calendar*) rc, (icalcomponent*) p->data);
+		callback(user, (Event*) p->data);
 	}
-}
-
-static void free_event(icalcomponent* ev)
-{
-	EventPrivate* priv = icalcomponent_get_private(ev);
-	free(priv->url);
-	free(priv->etag);
-	icalcomponent_free_private(ev);
-	icalcomponent_free(icalcomponent_get_parent(ev));
 }
 
 static void free_events(CaldavCalendar* rc)
 {
-	g_slist_free_full(rc->events, (GDestroyNotify) free_event);
+	g_slist_free_full(rc->events, (GDestroyNotify) event_free);
 }
 
-static icalcomponent* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde)
+static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde)
 {
 	// event updated
 	icalcomponent* comp = icalparser_parse_string(cde->caldata);
-	icalcomponent* event = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
-	g_assert_nonnull(event);
-	EventPrivate* fp = icalcomponent_create_private(event);
-	fp->cal = FOCAL_CALENDAR(cal);
-	// transfer ownership
-	fp->url = cde->href;
-	fp->etag = cde->etag;
+	icalcomponent* vev = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
+	g_assert_nonnull(vev);
+	Event* ev = event_new_from_icalcomponent(vev);
+	event_set_calendar(ev, FOCAL_CALENDAR(cal));
+	event_set_url(ev, cde->href);
+	free(cde->href);
+	event_update_etag(ev, cde->etag);
 	free(cde->caldata);
 	free(cde);
-	return event;
+	return ev;
 }
 
 static void caldav_entry_free(CaldavEntry* cde)
@@ -615,16 +558,16 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 		CaldavEntry* cde = (*n)->data;
 		// Look through the existing list of events for matching resources
 		for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
-			EventPrivate* pp = icalcomponent_get_private((*p)->data);
-			if (strcmp(cde->href, pp->url) == 0) {
+			Event* ee = (Event*) (*p)->data;
+			if (strcmp(cde->href, event_get_url(ee)) == 0) {
 				if (cde->caldata) {
 					// event updated
-					if (strcmp(cde->etag, pp->etag) == 0) {
+					if (strcmp(cde->etag, event_get_etag(ee)) == 0) {
 						// we already knew about this update (we probably did it ourselves). Just ignore it.
 						caldav_entry_free(cde);
 					} else {
 						// replace the old event with the new one
-						free_event((*p)->data);
+						event_free((*p)->data);
 						(*p)->data = create_event_from_parsed_xml(rc, cde);
 						nUpdated++;
 					}
@@ -632,7 +575,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 					// If the calendar-data is NULL, assume the event is deleted. This can
 					// happen if an event is removed after the sync-collection request but
 					// before the response to this multiget.
-					free_event((*p)->data);
+					event_free((*p)->data);
 					*p = (*p)->next;
 					caldav_entry_free(cde);
 				}
@@ -658,7 +601,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 		// A removal or permission denied that was not matched in the local list above will still be here,
 		// but its caldata member will be empty. So it can be ignored.
 		if (cde->caldata) {
-			icalcomponent* event = create_event_from_parsed_xml(rc, cde);
+			Event* event = create_event_from_parsed_xml(rc, cde);
 			sc->cal->events = g_slist_append(sc->cal->events, event);
 			nNew++;
 		} else {
@@ -764,9 +707,9 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		SyncEntry* se = s->data;
 		if (se->status == 404) {
 			for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
-				EventPrivate* pp = icalcomponent_get_private((*p)->data);
-				if (strcmp(se->href, pp->url) == 0) {
-					free_event((*p)->data);
+				Event* ee = (Event*) (*p)->data;
+				if (strcmp(se->href, event_get_url(ee)) == 0) {
+					event_free((*p)->data);
 					*p = (*p)->next;
 					nDeleted++;
 					break;
@@ -866,8 +809,7 @@ void caldav_calendar_init(CaldavCalendar* rc)
 
 void caldav_calendar_class_init(CaldavCalendarClass* klass)
 {
-	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
-	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
+	FOCAL_CALENDAR_CLASS(klass)->save_event = save_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;

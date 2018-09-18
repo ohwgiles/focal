@@ -19,9 +19,7 @@
 #include "week-view.h"
 
 struct _EventWidget {
-	icalcomponent* ev;
-	// associated calendar
-	Calendar* cal;
+	Event* ev;
 	// cached time values for faster drawing
 	int minutes_from, minutes_to;
 	// list pointer
@@ -143,14 +141,14 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 			double x = wv->x + SIDEBAR_WIDTH + d * day_width;
 			//printf("from %d to %d\n", icalcomponent_get_dtstart(event).hour, icalcomponent_get_dtend(event).hour);
 			//cairo_set_source_rgba(cr, 0.3, 0.3, 0.8, 0.8);
-			GdkRGBA* color = calendar_get_color(tmp->cal);
+			GdkRGBA* color = event_get_color(tmp->ev);
 			cairo_set_source_rgba(cr, color->red, color->green, color->blue, color->alpha);
 			cairo_rectangle(cr, x + 1, yfrom + 1, day_width - 2, yto - yfrom - 2);
 			cairo_fill(cr);
 
 			cairo_set_source_rgb(cr, 1, 1, 1);
 			cairo_move_to(cr, x + 5, yfrom + 15);
-			cairo_show_text(cr, icalcomponent_get_summary(tmp->ev));
+			cairo_show_text(cr, event_get_summary(tmp->ev));
 		}
 	}
 
@@ -195,7 +193,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			rect.x = dow * rect.width + SIDEBAR_WIDTH;
 			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->cal, tmp->ev, &rect);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->ev, &rect);
 		} else if (event->type == GDK_2BUTTON_PRESS) {
 			// double-click: request to create an event
 			// dtstart: round down to closest quarter-hour
@@ -205,24 +203,22 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			icaltimetype dtend = dtstart;
 			// duration: default event is 30min long
 			icaltime_adjust(&dtend, 0, 0, 30, 0);
-			icalcomponent* ev = icalcomponent_new_vevent();
-			icalcomponent_set_dtstamp(ev, icaltime_from_timet_with_zone(time(NULL), 0, wv->current_tz)); // required by ccs-calendarserver
-			icalcomponent_set_dtstart(ev, dtstart);
-			icalcomponent_set_dtend(ev, dtend);
-			icalcomponent_set_summary(ev, "New Event");
+			Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
+
+			/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
+			event_set_calendar(ev, wv->calendars->data);
 
 			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
 			rect.x = dow * rect.width + SIDEBAR_WIDTH;
 			rect.y = HEADER_HEIGHT + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
 
-			/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
-			week_view_add_event(wv, wv->calendars->data, ev);
+			week_view_add_event(wv, ev);
 			gtk_widget_queue_draw((GtkWidget*) wv);
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, wv->calendars->data, ev, &rect);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
 		} else {
 			// deselect
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL, NULL);
+			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 		}
 	}
 	return TRUE;
@@ -305,7 +301,7 @@ static void week_view_class_init(WeekViewClass* klass)
 	g_object_class_override_property(goc, PROP_HSCROLL_POLICY, "hscroll-policy");
 	g_object_class_override_property(goc, PROP_VSCROLL_POLICY, "vscroll-policy");
 
-	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_POINTER, G_TYPE_POINTER, G_TYPE_POINTER);
+	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
@@ -399,71 +395,42 @@ static void event_widget_set_extents(EventWidget* w, icaltimetype start, struct 
 	w->minutes_to = (start.hour + dur.hours) * 60 + start.minute + dur.minutes;
 }
 
-static void add_event_from_calendar(gpointer user_data, Calendar* cal, icalcomponent* ev)
+static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurationtype duration, gpointer user)
 {
-	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
-	icaltimetype dtstart = icalcomponent_get_dtstart(ev);
-	icaltimetype dtend = icalcomponent_get_dtend(ev);
-	const icaltimezone* tz = icaltime_get_timezone(dtstart);
-	// convert to local time
-	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, cw->current_tz);
-	icaltimezone_convert_time(&dtend, (icaltimezone*) tz, cw->current_tz);
+	WeekView* cw = FOCAL_WEEK_VIEW(user);
 
-	struct icaldurationtype duration = icalcomponent_get_duration(ev);
+	// crude faster filter
+	// TODO what if the week overlaps a year boundary?
+	if (next.year < cw->current_year || next.year > cw->current_year)
+		return;
 
-	icalproperty* rrule = icalcomponent_get_first_property(ev, ICAL_RRULE_PROPERTY);
-	if (rrule) {
-		// recurring event
-		struct icalrecurrencetype recur = icalproperty_get_rrule(rrule);
-		icalrecur_iterator* ritr = icalrecur_iterator_new(recur, dtstart);
-		icaltimetype next;
-		while (next = icalrecur_iterator_next(ritr), !icaltime_is_null_time(next)) {
-			// crude faster filter
-			// TODO what if the week overlaps a year boundary?
-			if (next.year < cw->current_year)
-				continue;
-			else if (next.year > cw->current_year)
-				break;
-
-			// exact check
-			icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
-			if (icaltime_span_overlaps(&span, &cw->current_view)) {
-				int dow = icaltime_day_of_week(next) - 1;
-				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-				w->ev = ev;
-				w->cal = cal;
-				event_widget_set_extents(w, next, duration);
-				w->next = cw->events_week[dow];
-				cw->events_week[dow] = w;
-			}
-		}
-		icalrecur_iterator_free(ritr);
-	} else {
-		// non-recurring event
-		if (dtstart.year == cw->current_year) {
-			icaltime_span span = icaltime_span_new(dtstart, icaltime_add(dtstart, duration), 0);
-			if (icaltime_span_overlaps(&span, &cw->current_view)) {
-				int dow = icaltime_day_of_week(dtstart) - 1;
-				EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-				w->ev = ev;
-				w->cal = cal;
-				event_widget_set_extents(w, dtstart, duration);
-				w->next = cw->events_week[dow];
-				cw->events_week[dow] = w;
-			}
-		}
+	// exact check
+	icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
+	if (icaltime_span_overlaps(&span, &cw->current_view)) {
+		int dow = icaltime_day_of_week(next) - 1;
+		EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
+		w->ev = ev;
+		event_widget_set_extents(w, next, duration);
+		w->next = cw->events_week[dow];
+		cw->events_week[dow] = w;
 	}
 }
 
-void week_view_add_event(WeekView* wv, Calendar* cal, icalcomponent* vevent)
+static void add_event_from_calendar(gpointer user_data, Event* ev)
 {
-	add_event_from_calendar(wv, cal, vevent);
+	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
+	event_each_recurrence(ev, cw->current_tz, add_event_occurrence, cw);
+}
+
+void week_view_add_event(WeekView* wv, Event* vevent)
+{
+	add_event_from_calendar(wv, vevent);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-void week_view_remove_event(WeekView* wv, icalcomponent* ev)
+void week_view_remove_event(WeekView* wv, Event* ev)
 {
-	icaltimetype dtstart = icalcomponent_get_dtstart(ev);
+	icaltimetype dtstart = event_get_dtstart(ev);
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
@@ -545,7 +512,7 @@ void week_view_next(WeekView* wv)
 	week_view_populate_view(wv);
 }
 
-void week_view_refresh(WeekView* wv, icalcomponent* ev)
+void week_view_refresh(WeekView* wv, Event* ev)
 {
 	// find corresponding EventWidget(s), there may be many if it's a recurring event
 	for (int i = 0; i < 7; ++i) {
@@ -554,8 +521,8 @@ void week_view_refresh(WeekView* wv, icalcomponent* ev)
 				// although dtstart may refer to a completely different day in the case
 				// of a recurring event, here we assume the hour/minute is consistent and
 				// so no need to go through all the recurrence rules again
-				icaltimetype dtstart = icalcomponent_get_dtstart(ev);
-				struct icaldurationtype duration = icalcomponent_get_duration(ev);
+				icaltimetype dtstart = event_get_dtstart(ev);
+				struct icaldurationtype duration = event_get_duration(ev);
 				event_widget_set_extents(*ew, dtstart, duration);
 			}
 		}

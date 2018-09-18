@@ -25,27 +25,34 @@ G_DEFINE_TYPE(LocalCalendar, local_calendar, TYPE_CALENDAR)
 
 static void write_ical_to_disk(LocalCalendar* lc)
 {
+	for (GSList* p = lc->events; p; p = p->next)
+		icalcomponent_add_component(lc->ical, icalcomponent_new_clone(event_get_component((Event*) p->data)));
+
 	g_file_set_contents(lc->path, icalcomponent_as_ical_string(lc->ical), -1, NULL);
+	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); (e = icalcomponent_get_current_component(lc->ical));) {
+		if (icalcomponent_isa(e) == ICAL_VEVENT_COMPONENT) {
+			icalcomponent_remove_component(lc->ical, e);
+			icalcomponent_free(e);
+		}
+	}
+
+	g_signal_emit_by_name(lc, "sync-done", 0);
 }
 
-static void add_event(Calendar* c, icalcomponent* event)
+static void save_event(Calendar* c, Event* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
 
-	icalcomponent_add_component(lc->ical, event);
+	if (!g_slist_find(lc->events, event))
+		lc->events = g_slist_append(lc->events, event);
 	write_ical_to_disk(lc);
 }
 
-static void update_event(Calendar* c, icalcomponent* event)
+static void delete_event(Calendar* c, Event* event)
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
-	write_ical_to_disk(lc);
-}
-
-static void delete_event(Calendar* c, icalcomponent* event)
-{
-	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
-	icalcomponent_remove_component(lc->ical, event);
+	lc->events = g_slist_remove(lc->events, event);
+	event_free(event);
 	write_ical_to_disk(lc);
 }
 
@@ -53,13 +60,13 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 {
 	LocalCalendar* lc = FOCAL_LOCAL_CALENDAR(c);
 	for (GSList* p = lc->events; p; p = p->next) {
-		callback(user, (Calendar*) lc, (icalcomponent*) p->data);
+		callback(user, (Event*) p->data);
 	}
 }
 
 static void free_events(LocalCalendar* lc)
 {
-	g_slist_free(lc->events);
+	g_slist_free_full(lc->events, (GDestroyNotify) event_free);
 	icalcomponent_free(lc->ical);
 	lc->events = NULL;
 	lc->ical = NULL;
@@ -92,10 +99,20 @@ static void local_calendar_sync(Calendar* c)
 	}
 
 	lc->ical = icalcomponent_new_from_string(contents);
+	g_assert_nonnull(lc->ical);
 	g_free(contents);
 	lc->events = NULL;
-	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); e; e = icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT)) {
-		lc->events = g_slist_append(lc->events, e);
+
+	for (icalcomponent* e = icalcomponent_get_first_component(lc->ical, ICAL_VEVENT_COMPONENT); (e = icalcomponent_get_current_component(lc->ical));) {
+		if (icalcomponent_isa(e) == ICAL_VEVENT_COMPONENT) {
+			Event* ev = event_new_from_icalcomponent(icalcomponent_new_clone(e));
+			icalcomponent_remove_component(lc->ical, e);
+			icalcomponent_free(e);
+			event_set_calendar(ev, c);
+			lc->events = g_slist_append(lc->events, ev);
+		} else {
+			icalcomponent_get_next_component(lc->ical, ICAL_VEVENT_COMPONENT);
+		}
 	}
 
 	g_signal_emit_by_name(c, "sync-done", 0);
@@ -103,8 +120,7 @@ static void local_calendar_sync(Calendar* c)
 
 void local_calendar_class_init(LocalCalendarClass* klass)
 {
-	FOCAL_CALENDAR_CLASS(klass)->add_event = add_event;
-	FOCAL_CALENDAR_CLASS(klass)->update_event = update_event;
+	FOCAL_CALENDAR_CLASS(klass)->save_event = save_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = local_calendar_sync;
