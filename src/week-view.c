@@ -132,6 +132,14 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_stroke(cr);
 
+	PangoLayout* layout = pango_cairo_create_layout(cr);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+
+	PangoFontDescription* font_desc = pango_font_description_from_string("sans 9");
+	pango_layout_set_font_description(layout, font_desc);
+	pango_font_description_free(font_desc);
+
 	// draw events
 	for (int d = 0; d < num_days; ++d) {
 		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
@@ -144,11 +152,16 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 			cairo_rectangle(cr, x + 1, yfrom + 1, day_width - 2, yto - yfrom - 2);
 			cairo_fill(cr);
 
+			pango_layout_set_width(layout, PANGO_SCALE * (day_width - 8));
+			pango_layout_set_height(layout, PANGO_SCALE * (yto - yfrom - 2));
+			pango_layout_set_text(layout, event_get_summary(tmp->ev), -1);
+
 			cairo_set_source_rgb(cr, 1, 1, 1);
-			cairo_move_to(cr, x + 5, yfrom + 15);
-			cairo_show_text(cr, event_get_summary(tmp->ev));
+			cairo_move_to(cr, x + 3, yfrom + 1);
+			pango_cairo_show_layout(cr, layout);
 		}
 	}
+	g_object_unref(layout);
 
 	if (wv->now.visible) {
 		double nowY = wv->y + HEADER_HEIGHT + wv->now.minutes * HALFHOUR_HEIGHT / 30 - wv->scroll_pos;
