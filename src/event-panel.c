@@ -20,8 +20,7 @@
 
 struct _EventPanel {
 	GtkBox parent;
-	GtkEntryBuffer* event_label;
-
+	GtkWidget* title;
 	GtkWidget* starts_at;
 	GtkWidget* duration;
 	GtkTextBuffer* description;
@@ -34,8 +33,7 @@ struct _EventPanel {
 G_DEFINE_TYPE(EventPanel, event_panel, GTK_TYPE_BOX)
 
 enum {
-	SIGNAL_EVENT_DELETE,
-	SIGNAL_EVENT_SAVE,
+	SIGNAL_EVENT_MODIFIED,
 	LAST_SIGNAL
 };
 
@@ -43,8 +41,7 @@ static guint event_panel_signals[LAST_SIGNAL] = {0};
 
 static void event_panel_class_init(EventPanelClass* klass)
 {
-	event_panel_signals[SIGNAL_EVENT_DELETE] = g_signal_new("cal-event-delete", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
-	event_panel_signals[SIGNAL_EVENT_SAVE] = g_signal_new("cal-event-save", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	event_panel_signals[SIGNAL_EVENT_MODIFIED] = g_signal_new("event-modified", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 }
 
 static void event_panel_init(EventPanel* self)
@@ -99,54 +96,34 @@ static void rsvp_yes_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
 	if (event_set_participation_status(ew->selected_event, ICAL_PARTSTAT_ACCEPTED))
-		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event);
+		event_save(ew->selected_event);
 }
 
 static void rsvp_maybe_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
 	if (event_set_participation_status(ew->selected_event, ICAL_PARTSTAT_TENTATIVE))
-		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event);
+		event_save(ew->selected_event);
 }
 
 static void rsvp_no_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
 	if (event_set_participation_status(ew->selected_event, ICAL_PARTSTAT_DECLINED))
-		g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event);
+		event_save(ew->selected_event);
 }
 
 static void delete_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_DELETE], 0, ew->selected_event);
+	// TODO "are you sure?" popup
+	calendar_delete_event(FOCAL_CALENDAR(event_get_calendar(ew->selected_event)), ew->selected_event);
 }
 
 static void save_clicked(GtkButton* button, gpointer user_data)
 {
 	EventPanel* ew = FOCAL_EVENT_PANEL(user_data);
-	// summary
-
-	event_set_summary(ew->selected_event, gtk_entry_buffer_get_text(ew->event_label));
-	// description
-	GtkTextIter start, end;
-	gtk_text_buffer_get_start_iter(ew->description, &start);
-	gtk_text_buffer_get_end_iter(ew->description, &end);
-	char* desc = gtk_text_buffer_get_text(ew->description, &start, &end, FALSE);
-	event_set_description(ew->selected_event, desc);
-	free(desc);
-	// start time
-	icaltimetype dtstart = event_get_dtstart(ew->selected_event);
-	int minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->starts_at));
-	dtstart.hour = minutes / 60;
-	dtstart.minute = minutes % 60;
-	event_set_dtstart(ew->selected_event, dtstart);
-	// duration
-	icaltimetype dtend = dtstart;
-	minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(ew->duration));
-	icaltime_adjust(&dtend, 0, minutes / 60, minutes % 60, 0);
-	event_set_dtend(ew->selected_event, dtend);
-	g_signal_emit(ew, event_panel_signals[SIGNAL_EVENT_SAVE], 0, ew->selected_event);
+	event_save(ew->selected_event);
 }
 
 static inline GtkWidget* field_label_new(const char* label)
@@ -198,10 +175,8 @@ GtkWidget* event_panel_new()
 	GtkWidget* bar = g_object_new(GTK_TYPE_ACTION_BAR, NULL);
 	gtk_style_context_add_class(gtk_widget_get_style_context((GtkWidget*) bar), GTK_STYLE_CLASS_TITLEBAR);
 
-	e->event_label = gtk_entry_buffer_new("", 0);
-	GtkWidget* event_title = g_object_new(GTK_TYPE_ENTRY, "buffer", e->event_label, "hexpand", TRUE, NULL);
-	gtk_entry_set_has_frame(GTK_ENTRY(event_title), FALSE);
-	gtk_container_add(GTK_CONTAINER(bar), event_title);
+	e->title = g_object_new(GTK_TYPE_ENTRY, "hexpand", TRUE, "has-frame", FALSE, NULL);
+	gtk_container_add(GTK_CONTAINER(bar), e->title);
 
 	GtkWidget* grid = gtk_grid_new();
 	g_object_set(grid, "margin", 5, NULL);
@@ -302,11 +277,52 @@ GtkWidget* event_panel_new()
 	return (GtkWidget*) e;
 }
 
+static void on_event_title_modified(GtkEntry* entry, EventPanel* ep)
+{
+	event_set_summary(ep->selected_event, gtk_entry_buffer_get_text(gtk_entry_get_buffer(entry)));
+	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
+}
+
+static void on_starts_at_modified(GtkSpinButton* starts_at, EventPanel* ep)
+{
+	icaltimetype dtstart = event_get_dtstart(ep->selected_event);
+	int minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(starts_at));
+	dtstart.hour = minutes / 60;
+	dtstart.minute = minutes % 60;
+	event_set_dtstart(ep->selected_event, dtstart);
+	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
+}
+
+static void on_duration_modified(GtkSpinButton* duration, EventPanel* ep)
+{
+	icaltimetype dtend = event_get_dtstart(ep->selected_event);
+	int minutes = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(duration));
+	icaltime_adjust(&dtend, 0, minutes / 60, minutes % 60, 0);
+	event_set_dtend(ep->selected_event, dtend);
+	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
+}
+
+static void on_description_modified(GtkTextBuffer* description, EventPanel* ew)
+{
+	GtkTextIter start, end;
+	gtk_text_buffer_get_start_iter(description, &start);
+	gtk_text_buffer_get_end_iter(description, &end);
+	char* desc = gtk_text_buffer_get_text(description, &start, &end, FALSE);
+	event_set_description(ew->selected_event, desc);
+	free(desc);
+	// No signal emitted since the description is not visible in the main view anyway
+}
+
 void event_panel_set_event(EventPanel* ew, Event* ev)
 {
+	g_signal_handlers_disconnect_by_func(ew->title, (gpointer) on_event_title_modified, ew);
+	g_signal_handlers_disconnect_by_func(ew->starts_at, (gpointer) on_starts_at_modified, ew);
+	g_signal_handlers_disconnect_by_func(ew->duration, (gpointer) on_duration_modified, ew);
+	g_signal_handlers_disconnect_by_func(ew->description, (gpointer) on_description_modified, ew);
+
 	gtk_list_store_clear(ew->attendees_model);
 	if (ev) {
-		gtk_entry_buffer_set_text(ew->event_label, event_get_summary(ev), -1);
+		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(ew->title)), event_get_summary(ev), -1);
 
 		// TODO: timezone conversion
 		icaltimetype dt = event_get_dtstart(ev);
@@ -319,6 +335,11 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), event_get_description(ev), -1);
 
 		populate_attendees(ew->attendees_model, ev);
+
+		g_signal_connect(ew->title, "changed", (GCallback) on_event_title_modified, ew);
+		g_signal_connect(ew->starts_at, "changed", G_CALLBACK(on_starts_at_modified), ew);
+		g_signal_connect(ew->duration, "changed", G_CALLBACK(on_duration_modified), ew);
+		g_signal_connect(ew->description, "changed", G_CALLBACK(on_description_modified), ew);
 	}
 	ew->selected_event = ev;
 }

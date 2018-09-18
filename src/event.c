@@ -19,6 +19,7 @@ struct _Event {
 	Calendar* cal;
 	char* url;
 	char* etag;
+	gboolean dirty;
 };
 
 Calendar* event_get_calendar(Event* ev)
@@ -38,6 +39,11 @@ GdkRGBA* event_get_color(Event* ev)
 icalcomponent* event_get_component(Event* ev)
 {
 	return ev->cmp;
+}
+
+gboolean event_get_dirty(Event* ev)
+{
+	return ev->dirty;
 }
 
 const char* event_get_summary(Event* ev)
@@ -114,6 +120,7 @@ void event_set_calendar(Event* ev, Calendar* cal)
 void event_set_dtstart(Event* ev, icaltimetype dt)
 {
 	icalcomponent_set_dtstart(ev->cmp, dt);
+	ev->dirty = TRUE;
 }
 
 void event_set_dtend(Event* ev, icaltimetype dt)
@@ -123,6 +130,7 @@ void event_set_dtend(Event* ev, icaltimetype dt)
 	// a DURATION. So unconditionally remove any DURATION property before calling set_dtend.
 	icalcomponent_remove_property(ev->cmp, icalcomponent_get_first_property(ev->cmp, ICAL_DURATION_PROPERTY));
 	icalcomponent_set_dtend(ev->cmp, dt);
+	ev->dirty = TRUE;
 }
 
 gboolean event_set_participation_status(Event* ev, icalparameter_partstat status)
@@ -140,6 +148,7 @@ gboolean event_set_participation_status(Event* ev, icalparameter_partstat status
 				icalproperty_add_parameter(attendee, partstat);
 			}
 			icalparameter_set_partstat(partstat, status);
+			ev->dirty = TRUE;
 			return TRUE;
 		}
 	}
@@ -149,11 +158,13 @@ gboolean event_set_participation_status(Event* ev, icalparameter_partstat status
 void event_set_description(Event* ev, const char* description)
 {
 	icalcomponent_set_description(ev->cmp, description);
+	ev->dirty = TRUE;
 }
 
 void event_set_summary(Event* ev, const char* summary)
 {
 	icalcomponent_set_summary(ev->cmp, summary);
+	ev->dirty = TRUE;
 }
 
 void event_set_url(Event* ev, const char* url)
@@ -171,6 +182,7 @@ void event_add_attendee(Event* ev, const char* name)
 {
 	icalproperty* attendee = icalproperty_new_attendee(name);
 	icalcomponent_add_property(ev->cmp, attendee);
+	ev->dirty = TRUE;
 }
 
 void event_each_attendee(Event* ev, void (*callback)(), void* user)
@@ -183,6 +195,7 @@ void event_each_attendee(Event* ev, void (*callback)(), void* user)
 void event_remove_attendee(Event* ev, icalproperty* attendee)
 {
 	icalcomponent_remove_property(ev->cmp, attendee);
+	ev->dirty = TRUE;
 }
 
 void event_each_recurrence(Event* ev, const icaltimezone* user_tz, EventRecurrenceCallback callback, gpointer user)
@@ -254,6 +267,8 @@ Event* event_new(const char* summary, icaltimetype dtstart, icaltimetype dtend, 
 	icalcomponent_set_dtend(ev, dtend);
 	icalcomponent_set_summary(ev, summary);
 	e->cmp = ev;
+	// Not exactly dirty, but has never been saved to a calendar
+	e->dirty = TRUE;
 	return e;
 }
 
@@ -276,6 +291,7 @@ char* event_as_ical_string(Event* ev)
 void event_save(Event* ev)
 {
 	calendar_save_event(ev->cal, ev);
+	ev->dirty = FALSE;
 }
 
 void event_free(Event* ev)

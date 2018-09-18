@@ -31,6 +31,7 @@ typedef struct _Event Event;
 // Getters for data members. No data transfer.
 Calendar* event_get_calendar(Event* ev);
 GdkRGBA* event_get_color(Event* ev);
+gboolean event_get_dirty(Event* ev);
 icalcomponent* event_get_component(Event* ev);
 const char* event_get_summary(Event* ev);
 const char* event_get_description(Event* ev);

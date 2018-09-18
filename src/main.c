@@ -87,15 +87,8 @@ static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, 
 	}
 }
 
-static void event_delete(EventPanel* event_panel, Event* ev, FocalMain* focal)
+static void on_event_modified(EventPanel* event_panel, Event* ev, FocalMain* focal)
 {
-	// TODO "are you sure?" popup
-	calendar_delete_event(FOCAL_CALENDAR(event_get_calendar(ev)), ev);
-}
-
-static void on_event_save(EventPanel* event_panel, Event* ev, FocalMain* focal)
-{
-	event_save(ev);
 	// needed in case the time, duration or summary changed
 	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
@@ -283,8 +276,7 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_window_set_type_hint((GtkWindow*) fm->mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
 	g_signal_connect(fm->weekView, "event-selected", (GCallback) &cal_event_selected, fm);
-	g_signal_connect(fm->eventDetail, "cal-event-delete", (GCallback) &event_delete, fm);
-	g_signal_connect(fm->eventDetail, "cal-event-save", (GCallback) &on_event_save, fm);
+	g_signal_connect(fm->eventDetail, "event-modified", (GCallback) &on_event_modified, fm);
 
 	GtkWidget* header = gtk_header_bar_new();
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
