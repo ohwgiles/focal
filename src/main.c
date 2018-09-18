@@ -49,6 +49,15 @@ static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* c
 	}
 }
 
+static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalMain* fm)
+{
+	if (ev) {
+		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
+		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), ev);
+		gtk_popover_popup(GTK_POPOVER(fm->popover));
+	}
+}
+
 static void focal_add_event(FocalMain* focal, Event* ev)
 {
 	event_each_attendee(ev, match_event_to_calendar, focal->calendars);
@@ -60,31 +69,8 @@ static void focal_add_event(FocalMain* focal, Event* ev)
 		event_set_calendar(ev, cal);
 	}
 
+	week_view_focus_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
-
-	GtkWidget* dialog;
-	dialog = gtk_message_dialog_new(GTK_WINDOW(focal->mainWindow),
-									GTK_DIALOG_DESTROY_WITH_PARENT,
-									GTK_MESSAGE_ERROR,
-									GTK_BUTTONS_YES_NO,
-									"Add event \"%s\" to calendar?",
-									event_get_summary(ev));
-	int resp = gtk_dialog_run(GTK_DIALOG(dialog));
-	if (resp == GTK_RESPONSE_YES) {
-		calendar_save_event(cal, ev);
-	} else {
-		week_view_remove_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
-	}
-	gtk_widget_destroy(dialog);
-}
-
-static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalMain* fm)
-{
-	if (ev) {
-		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
-		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), ev);
-		gtk_popover_popup(GTK_POPOVER(fm->popover));
-	}
 }
 
 static void on_event_modified(EventPanel* event_panel, Event* ev, FocalMain* focal)
@@ -185,18 +171,6 @@ static void update_window_title(FocalMain* fm)
 	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), week_title);
 }
 
-static void on_nav_previous(GtkButton* button, FocalMain* fm)
-{
-	week_view_previous(FOCAL_WEEK_VIEW(fm->weekView));
-	update_window_title(fm);
-}
-
-static void on_nav_next(GtkButton* button, FocalMain* fm)
-{
-	week_view_next(FOCAL_WEEK_VIEW(fm->weekView));
-	update_window_title(fm);
-}
-
 static void on_calendar_menu(GtkButton* button, FocalMain* fm)
 {
 	GMenu* menu_main = g_menu_new();
@@ -276,6 +250,7 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_window_set_type_hint((GtkWindow*) fm->mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
 	g_signal_connect(fm->weekView, "event-selected", (GCallback) &cal_event_selected, fm);
+	g_signal_connect_swapped(fm->weekView, "date-range-changed", (GCallback) &update_window_title, fm);
 	g_signal_connect(fm->eventDetail, "event-modified", (GCallback) &on_event_modified, fm);
 
 	GtkWidget* header = gtk_header_bar_new();
@@ -287,8 +262,8 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_container_add(GTK_CONTAINER(nav), prev);
 	gtk_container_add(GTK_CONTAINER(nav), next);
-	g_signal_connect(prev, "clicked", (GCallback) &on_nav_previous, fm);
-	g_signal_connect(next, "clicked", (GCallback) &on_nav_next, fm);
+	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_previous, fm->weekView);
+	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_next, fm->weekView);
 
 	GtkWidget* menu = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));

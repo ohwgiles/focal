@@ -47,6 +47,7 @@ struct _WeekView {
 
 enum {
 	SIGNAL_EVENT_SELECTED,
+	SIGNAL_DATE_RANGE_CHANGED,
 	LAST_SIGNAL
 };
 
@@ -299,6 +300,7 @@ static void week_view_class_init(WeekViewClass* klass)
 	g_object_class_override_property(goc, PROP_VSCROLL_POLICY, "vscroll-policy");
 
 	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+	week_view_signals[SIGNAL_DATE_RANGE_CHANGED] = g_signal_new("date-range-changed", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
@@ -499,6 +501,7 @@ void week_view_previous(WeekView* wv)
 	if (--wv->current_week == 0)
 		wv->current_week = weeks_in_year(--wv->current_year) - 1;
 	week_view_populate_view(wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
 void week_view_next(WeekView* wv)
@@ -507,6 +510,7 @@ void week_view_next(WeekView* wv)
 	if (wv->current_week == 1)
 		wv->current_year++;
 	week_view_populate_view(wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
 void week_view_refresh(WeekView* wv, Event* ev)
@@ -525,4 +529,22 @@ void week_view_refresh(WeekView* wv, Event* ev)
 		}
 	}
 	gtk_widget_queue_draw((GtkWidget*) wv);
+}
+
+void week_view_focus_event(WeekView* wv, Event* event)
+{
+	// The event might not be in the current view
+	icaltimetype dt = event_get_dtstart(event);
+	icaltimetype et = event_get_dtend(event);
+	wv->current_week = icaltime_week_number(dt) + 1;
+	wv->current_year = dt.year;
+	week_view_populate_view(wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+
+	GdkRectangle rect;
+	rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+	rect.x = (icaltime_day_of_week(dt) - 1) * rect.width + SIDEBAR_WIDTH;
+	rect.y = HEADER_HEIGHT + (dt.hour * 60 + dt.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
+	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
 }

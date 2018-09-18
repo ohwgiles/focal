@@ -245,6 +245,8 @@ Event* event_new_from_ics_file(const char* path)
 		if (c) {
 			Event* ev = g_new0(Event, 1);
 			ev->cmp = c;
+			// Not exactly dirty, but has never been saved to a calendar
+			ev->dirty = TRUE;
 			return ev;
 		}
 	} while (line);
