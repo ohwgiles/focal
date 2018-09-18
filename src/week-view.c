@@ -11,6 +11,7 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
+#include <ctype.h>
 #include <gtk/gtk.h>
 #include <libical/ical.h>
 #include <stdlib.h>
@@ -30,7 +31,7 @@ typedef struct _EventWidget EventWidget;
 struct _WeekView {
 	GtkDrawingArea drawing_area;
 	int x, y, width, height;
-	double scroll_pos;
+	int scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
 	EventWidget* events_week[7];
@@ -61,7 +62,7 @@ enum {
 	PROP_VSCROLL_POLICY,
 };
 
-#define HEADER_HEIGHT 50.5
+#define HEADER_HEIGHT 35.5
 
 // Implemented from GtkScrollable, causes the scroll bar to start below the header
 static gboolean get_border(GtkScrollable* scrollable, GtkBorder* border)
@@ -77,7 +78,7 @@ static void week_view_scrollable_init(GtkScrollableInterface* iface)
 
 G_DEFINE_TYPE_WITH_CODE(WeekView, week_view, GTK_TYPE_DRAWING_AREA, G_IMPLEMENT_INTERFACE(GTK_TYPE_SCROLLABLE, week_view_scrollable_init))
 
-#define SIDEBAR_WIDTH 50.5
+#define SIDEBAR_WIDTH 25.5
 #define HALFHOUR_HEIGHT 30.0
 
 static void week_view_draw(WeekView* wv, cairo_t* cr)
@@ -85,44 +86,64 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	const int num_days = 7;
 	const double dashes[] = {1.0};
 
-	double col = 0.5;
-	cairo_set_source_rgb(cr, col, col, col);
+	double dark = 0.3, med = 0.65, light = 0.85;
+	cairo_set_source_rgb(cr, dark, dark, dark);
 	cairo_set_line_width(cr, 1.0);
 
 	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT + 1;
+
+	cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
+
+	cairo_set_font_size(cr, 12);
 
 	for (int hh = first_visible_halfhour;; ++hh) {
 		double y = wv->y + HEADER_HEIGHT + hh * HALFHOUR_HEIGHT - wv->scroll_pos;
 		if (y > wv->y + wv->height)
 			break;
-		cairo_move_to(cr, wv->x, y);
-		cairo_rel_line_to(cr, wv->width, 0);
 		if (hh % 2 == 0) {
+			cairo_set_source_rgb(cr, med, med, med);
+			cairo_set_dash(cr, NULL, 0, 0);
+			cairo_move_to(cr, wv->x, y);
+			cairo_rel_line_to(cr, wv->width, 0);
+			cairo_stroke(cr);
 			// draw hour labels
 			char hourlabel[8];
-			cairo_move_to(cr, wv->x + 5, y + 10);
-			sprintf(hourlabel, "%d:00", hh / 2);
+			cairo_move_to(cr, wv->x + 5, y + 12);
+			sprintf(hourlabel, "%02d", hh / 2);
+			cairo_set_source_rgb(cr, dark, dark, dark);
 			cairo_show_text(cr, hourlabel);
-			cairo_set_dash(cr, NULL, 0, 0);
-		} else
+		} else {
+			cairo_set_source_rgb(cr, light, light, light);
 			cairo_set_dash(cr, dashes, 1, 0);
-		cairo_stroke(cr);
+			cairo_move_to(cr, wv->x + SIDEBAR_WIDTH, y);
+			cairo_rel_line_to(cr, wv->width, 0);
+			cairo_stroke(cr);
+		}
 	}
 
 	// draw vertical lines for days
 	const int day_width = (double) (wv->width - SIDEBAR_WIDTH) / num_days;
 	cairo_set_dash(cr, NULL, 0, 0);
 	time_t t = wv->current_view.start;
-	for (int d = 0; d < num_days; ++d) {
+	for (int d = 0; d < num_days; ++d, t += 60 * 60 * 24) {
 		double x = wv->x + SIDEBAR_WIDTH + d * day_width;
 
 		char daylabel[16];
 		struct tm* firstday = localtime(&t);
-		strftime(daylabel, 16, "%e %a", firstday);
-		t += 60 * 60 * 24;
+		strftime(daylabel, 16, "%e", firstday);
 		cairo_move_to(cr, x + 5, wv->y + HEADER_HEIGHT - 5);
+		cairo_set_font_size(cr, 22);
+		cairo_set_source_rgb(cr, dark, dark, dark);
 		cairo_show_text(cr, daylabel);
 
+		strftime(daylabel, 16, "%a", firstday);
+		for (char* p = daylabel; *p; ++p)
+			*p = toupper(*p);
+		cairo_move_to(cr, x + 35, wv->y + HEADER_HEIGHT - 5);
+		cairo_set_font_size(cr, 11);
+		cairo_show_text(cr, daylabel);
+
+		cairo_set_source_rgb(cr, med, med, med);
 		cairo_move_to(cr, x, wv->y + HEADER_HEIGHT);
 		cairo_rel_line_to(cr, 0, wv->height);
 		cairo_stroke(cr);
@@ -130,6 +151,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	// top bar
 	cairo_move_to(cr, wv->x, wv->y + HEADER_HEIGHT);
 	cairo_rel_line_to(cr, wv->width, 0);
+	cairo_set_source_rgb(cr, dark, dark, dark);
 	cairo_stroke(cr);
 
 	PangoLayout* layout = pango_cairo_create_layout(cr);
