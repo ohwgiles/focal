@@ -232,6 +232,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			// dtstart: round down to closest quarter-hour
 			time_t at = wv->current_view.start + dow * 24 * 3600 + 15 * (minutesAt / 15) * 60;
 			icaltimetype dtstart = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
+			// https://github.com/libical/libical/blob/master/src/test/timezones.c#L96
 			dtstart.zone = wv->current_tz;
 			icaltimetype dtend = dtstart;
 			// duration: default event is 30min long

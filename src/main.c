@@ -22,7 +22,11 @@
 #include <libical/ical.h>
 #include <strings.h>
 
-typedef struct {
+#define FOCAL_TYPE_APP (focal_app_get_type())
+G_DECLARE_FINAL_TYPE(FocalApp, focal_app, FOCAL, APP, GtkApplication)
+
+struct _FocalApp {
+	GtkApplication parent;
 	GtkWidget* mainWindow;
 	char* config_path;
 	GSList* config;
@@ -30,7 +34,15 @@ typedef struct {
 	GtkWidget* weekView;
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
-} FocalMain;
+};
+
+enum {
+	SIGNAL_BROWSER_AUTH_RESP,
+	LAST_SIGNAL
+};
+static gint focal_app_signals[LAST_SIGNAL] = {0};
+
+G_DEFINE_TYPE(FocalApp, focal_app, GTK_TYPE_APPLICATION)
 
 static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* calendars)
 {
@@ -49,7 +61,7 @@ static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* c
 	}
 }
 
-static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalMain* fm)
+static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalApp* fm)
 {
 	if (ev) {
 		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
@@ -58,7 +70,7 @@ static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, 
 	}
 }
 
-static void focal_add_event(FocalMain* focal, Event* ev)
+static void focal_add_event(FocalApp* focal, Event* ev)
 {
 	event_each_attendee(ev, match_event_to_calendar, focal->calendars);
 
@@ -73,14 +85,14 @@ static void focal_add_event(FocalMain* focal, Event* ev)
 	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
-static void on_event_modified(EventPanel* event_panel, Event* ev, FocalMain* focal)
+static void on_event_modified(EventPanel* event_panel, Event* ev, FocalApp* focal)
 {
 	// needed in case the time, duration or summary changed
 	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
-void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
+void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
 {
 	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
 	Calendar* calendar = NULL;
@@ -102,52 +114,21 @@ void toggle_calendar(GSimpleAction* action, GVariant* value, FocalMain* fm)
 	g_simple_action_set_state(action, value);
 }
 
-static void calendar_synced(FocalMain* fm, Calendar* cal)
+static void calendar_synced(FocalApp* fm, Calendar* cal)
 {
 	// TODO more efficiently?
 	week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
+	// The popover might be up and holding a reference to a just-invalidated event
+	gtk_widget_hide(fm->popover);
 }
 
-static char* calendar_request_password(FocalMain* fm, const char* account_name, const char* user)
-{
-	GtkWidget* dialog = gtk_dialog_new_with_buttons("Focal", GTK_WINDOW(fm->mainWindow), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_OK", GTK_RESPONSE_OK, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
-	GtkEntryBuffer* buffer = gtk_entry_buffer_new("", 0);
-
-	GtkWidget* grid = gtk_grid_new();
-	g_object_set(grid, "column-spacing", 12, "row-spacing", 9, "margin-bottom", 12, "margin-top", 12, NULL);
-	gtk_grid_attach(GTK_GRID(grid), gtk_image_new_from_icon_name("dialog-password-symbolic", GTK_ICON_SIZE_DIALOG), 0, 0, 1, 4);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "<b>This operation requires your password</b>", "use-markup", TRUE, NULL), 1, 0, 2, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Account:", "halign", GTK_ALIGN_END, NULL), 1, 1, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", account_name, "halign", GTK_ALIGN_START, NULL), 2, 1, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Username:", "halign", GTK_ALIGN_END, NULL), 1, 2, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", user, "halign", GTK_ALIGN_START, NULL), 2, 2, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Password:", "halign", GTK_ALIGN_END, NULL), 1, 3, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_ENTRY, "buffer", buffer, "input-purpose", GTK_INPUT_PURPOSE_PASSWORD, "visibility", FALSE, "halign", GTK_ALIGN_START, NULL), 2, 3, 1, 1);
-
-	GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
-	g_object_set(content, "margin", 6, NULL);
-	gtk_container_add(GTK_CONTAINER(content), grid);
-	gtk_widget_show_all(dialog);
-
-	int ret = gtk_dialog_run(GTK_DIALOG(dialog));
-	char* res = NULL;
-	if (ret == GTK_RESPONSE_OK) {
-		res = g_strdup(gtk_entry_buffer_get_text(buffer));
-	}
-	gtk_widget_destroy(dialog);
-	g_object_unref(buffer);
-
-	return res;
-}
-
-static void create_calendars(FocalMain* fm)
+static void create_calendars(FocalApp* fm)
 {
 	for (GSList* p = fm->config; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
-		g_signal_connect_swapped(cal, "request-password", (GCallback) calendar_request_password, fm);
 		fm->calendars = g_slist_append(fm->calendars, cal);
 		calendar_sync(cal);
 	}
@@ -162,7 +143,7 @@ static void create_calendars(FocalMain* fm)
 	}
 }
 
-static void update_window_title(FocalMain* fm)
+static void update_window_title(FocalApp* fm)
 {
 	int week_num = week_view_get_current_week(FOCAL_WEEK_VIEW(fm->weekView));
 	char week_title[8];
@@ -171,7 +152,7 @@ static void update_window_title(FocalMain* fm)
 	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), week_title);
 }
 
-static void on_calendar_menu(GtkButton* button, FocalMain* fm)
+static void on_calendar_menu(GtkButton* button, FocalApp* fm)
 {
 	GMenu* menu_main = g_menu_new();
 	GMenu* menu_calanders = g_menu_new();
@@ -190,7 +171,7 @@ static void on_calendar_menu(GtkButton* button, FocalMain* fm)
 	gtk_widget_show(menu);
 }
 
-static void on_sync_clicked(GtkButton* button, FocalMain* fm)
+static void on_sync_clicked(GtkButton* button, FocalApp* fm)
 {
 	for (GSList* p = fm->calendars; p; p = p->next) {
 		Calendar* cal = FOCAL_CALENDAR(p->data);
@@ -200,7 +181,7 @@ static void on_sync_clicked(GtkButton* button, FocalMain* fm)
 
 static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
 {
-	FocalMain* fm = (FocalMain*) user_data;
+	FocalApp* fm = (FocalApp*) user_data;
 	// remove all calendars from view and remove window action
 	for (GSList* p = fm->calendars; p; p = p->next) {
 		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
@@ -220,14 +201,14 @@ static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer 
 
 static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
 {
-	FocalMain* fm = (FocalMain*) user_data;
+	FocalApp* fm = (FocalApp*) user_data;
 	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), fm->config);
 	g_signal_connect(accounts, "config-changed", (GCallback) on_config_changed, fm);
-	gtk_widget_show_all(accounts);
 	g_signal_connect(accounts, "response", G_CALLBACK(gtk_widget_destroy), NULL);
+	gtk_widget_show_all(accounts);
 }
 
-static void focal_create_main_window(GApplication* app, FocalMain* fm)
+static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 	fm->weekView = week_view_new();
@@ -289,13 +270,14 @@ static void focal_create_main_window(GApplication* app, FocalMain* fm)
 	gtk_widget_show_all(fm->mainWindow);
 }
 
-static void focal_startup(GApplication* app, FocalMain* fm)
+static void focal_startup(GApplication* app)
 {
 	// needed to generate unique uuids for new events
 	srand(time(NULL) * getpid());
 
 	async_curl_init();
 
+	FocalApp* fm = FOCAL_APP(app);
 	const char *config_dir, *home;
 	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
 		asprintf(&fm->config_path, "%s/focal.conf", config_dir);
@@ -305,43 +287,81 @@ static void focal_startup(GApplication* app, FocalMain* fm)
 		return (void) fprintf(stderr, "Could not find .config path\n");
 
 	fm->config = calendar_config_load_from_file(fm->config_path);
+
+	g_application_activate(app);
 }
 
-static void focal_activate(GApplication* app, FocalMain* fm)
+static void focal_activate(GApplication* app)
 {
+	FocalApp* fm = FOCAL_APP(app);
 	focal_create_main_window(app, fm);
 }
 
-static void focal_shutdown(GApplication* app, FocalMain* fm)
+static void focal_shutdown(GApplication* app)
 {
+	FocalApp* fm = FOCAL_APP(app);
 	g_slist_free_full(fm->calendars, g_object_unref);
 	g_slist_free_full(fm->config, (GDestroyNotify) calendar_config_free);
 	free(fm->config_path);
 	async_curl_cleanup();
 }
 
-static void focal_open(GApplication* app, GFile** files, gint n_files, gchar* hint, FocalMain* fm)
+static gint focal_cmdline(GApplication* application, GApplicationCommandLine* command_line)
 {
-	if (!fm->mainWindow)
-		focal_create_main_window(app, fm);
-	for (int i = 0; i < n_files; ++i) {
-		Event* e = event_new_from_ics_file(g_file_get_path(files[i]));
-		if (e) {
-			focal_add_event(fm, e);
+	gint argc;
+	gint ret = 0;
+	gchar** argv = g_application_command_line_get_arguments(command_line, &argc);
+	for (int i = 1; i < argc; ++i) {
+		const char* auth_scheme = "net.ohwg.focal:/auth/google?";
+		if (g_ascii_strncasecmp(argv[i], auth_scheme, strlen(auth_scheme)) == 0) {
+			gchar *cookie = NULL, *code = NULL, *sp;
+			for (char* p = strtok_r(argv[i] + strlen(auth_scheme), "&", &sp); p; p = strtok_r(NULL, "&", &sp)) {
+				if (g_ascii_strncasecmp(p, "state=", strlen("state=")) == 0) {
+					cookie = &p[strlen("state=")];
+				} else if (g_ascii_strncasecmp(p, "code=", strlen("code=")) == 0) {
+					code = &p[strlen("code=")];
+				}
+			}
+			if (cookie && code)
+				g_signal_emit(application, focal_app_signals[SIGNAL_BROWSER_AUTH_RESP], 0, cookie, code);
+			continue;
 		}
+
+		GFile* file = g_application_command_line_create_file_for_arg(command_line, argv[i]);
+		if (!file)
+			continue;
+
+		Event* e = event_new_from_ics_file(g_file_get_path(file));
+		if (e) {
+			focal_add_event(FOCAL_APP(application), e);
+		} else {
+			g_application_command_line_print(command_line, "Could not read file %s\n", argv[i]);
+			ret = 1;
+		}
+		g_object_unref(file);
 	}
+	g_strfreev(argv);
+	return ret;
+}
+
+static void focal_app_class_init(FocalAppClass* klass)
+{
+	GObjectClass* goc = G_OBJECT_CLASS(klass);
+	focal_app_signals[SIGNAL_BROWSER_AUTH_RESP] = g_signal_new("browser-auth-response", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+}
+
+static void focal_app_init(FocalApp* focal)
+{
 }
 
 int main(int argc, char** argv)
 {
 	int status;
-	GtkApplication* app = gtk_application_new("net.ohwg.focal", G_APPLICATION_HANDLES_OPEN);
-	FocalMain fm = {0};
-
-	g_signal_connect(app, "startup", G_CALLBACK(focal_startup), &fm);
-	g_signal_connect(app, "activate", G_CALLBACK(focal_activate), &fm);
-	g_signal_connect(app, "shutdown", G_CALLBACK(focal_shutdown), &fm);
-	g_signal_connect(app, "open", G_CALLBACK(focal_open), &fm);
+	GtkApplication* app = g_object_new(FOCAL_TYPE_APP, "application-id", "net.ohwg.focal", "flags", G_APPLICATION_HANDLES_COMMAND_LINE, NULL);
+	g_signal_connect(app, "startup", G_CALLBACK(focal_startup), NULL);
+	g_signal_connect(app, "activate", G_CALLBACK(focal_activate), NULL);
+	g_signal_connect(app, "shutdown", G_CALLBACK(focal_shutdown), NULL);
+	g_signal_connect(app, "command-line", G_CALLBACK(focal_cmdline), NULL);
 	g_application_register(G_APPLICATION(app), NULL, NULL);
 
 	status = g_application_run(G_APPLICATION(app), argc, argv);

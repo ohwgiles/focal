@@ -19,10 +19,6 @@
 #define CALDAV_CALENDAR_TYPE (caldav_calendar_get_type())
 G_DECLARE_FINAL_TYPE(CaldavCalendar, caldav_calendar, FOCAL, CALDAV_CALENDAR, Calendar)
 
-Calendar* caldav_calendar_new(const CalendarConfig* cfg);
-
-void caldav_calendar_sync(CaldavCalendar* cal);
-
-void caldav_calendar_free(CaldavCalendar* cal);
+Calendar* caldav_calendar_new(CalendarConfig* cfg);
 
 #endif // CALDAV_CALENDAR_H

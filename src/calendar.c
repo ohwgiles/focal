@@ -70,7 +70,7 @@ const CalendarConfig* calendar_get_config(Calendar* self)
 const char* calendar_get_name(Calendar* self)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
-	return priv->config->name;
+	return priv->config->label;
 }
 
 const char* calendar_get_email(Calendar* self)
@@ -92,17 +92,21 @@ Calendar* calendar_create(CalendarConfig* cfg)
 {
 	Calendar* cal;
 	switch (cfg->type) {
+	case CAL_TYPE_GOOGLE:
+		// TODO: remove duplication with AccountEditDialog, and handle the case where the configured email doesn't match the actual logged in one
+		cfg->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", cfg->email);
+		// fall through
 	case CAL_TYPE_CALDAV:
 		cal = caldav_calendar_new(cfg);
 		break;
 	case CAL_TYPE_FILE:
-		cal = local_calendar_new(cfg->d.file.path);
+		cal = local_calendar_new(cfg->location);
 		break;
 	}
 
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(cal);
 	priv->config = cfg;
-	double hue = (g_str_hash(priv->config->name) % USHRT_MAX) / (double) USHRT_MAX;
+	double hue = (g_str_hash(priv->config->label) % USHRT_MAX) / (double) USHRT_MAX;
 	gtk_hsv_to_rgb(hue, 0.7, 0.7, &priv->color.red, &priv->color.green, &priv->color.blue);
 	priv->color.alpha = 0.85;
 

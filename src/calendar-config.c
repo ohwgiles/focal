@@ -16,17 +16,11 @@
 
 void calendar_config_free(CalendarConfig* cfg)
 {
-	free(cfg->name);
+	free(cfg->label);
+	free(cfg->location);
 	free(cfg->email);
-	switch (cfg->type) {
-	case CAL_TYPE_CALDAV:
-		free(cfg->d.caldav.url);
-		free(cfg->d.caldav.user);
-		break;
-	case CAL_TYPE_FILE:
-		free(cfg->d.file.path);
-		break;
-	}
+	free(cfg->cookie);
+	free(cfg->login);
 	free(cfg);
 }
 
@@ -35,6 +29,8 @@ const char* calendar_type_as_string(CalendarAccountType type)
 	switch (type) {
 	case CAL_TYPE_CALDAV:
 		return "CalDAV";
+	case CAL_TYPE_GOOGLE:
+		return "Google Calendar";
 	case CAL_TYPE_FILE:
 		return "Local iCal File";
 	}
@@ -56,18 +52,21 @@ GSList* calendar_config_load_from_file(const char* config_file)
 		gchar* type = g_key_file_get_string(keyfile, groups[i], "type", NULL);
 		if (g_strcmp0(type, "caldav") == 0) {
 			cfg->type = CAL_TYPE_CALDAV;
-			cfg->d.caldav.url = g_key_file_get_string(keyfile, groups[i], "url", NULL);
-			cfg->d.caldav.user = g_key_file_get_string(keyfile, groups[i], "user", NULL);
+			cfg->location = g_key_file_get_string(keyfile, groups[i], "url", NULL);
+			cfg->login = g_key_file_get_string(keyfile, groups[i], "user", NULL);
+		} else if (g_strcmp0(type, "google") == 0) {
+			cfg->type = CAL_TYPE_GOOGLE;
+			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
 		} else if (g_strcmp0(type, "file") == 0) {
 			cfg->type = CAL_TYPE_FILE;
-			cfg->d.file.path = g_key_file_get_string(keyfile, groups[i], "path", NULL);
+			cfg->location = g_key_file_get_string(keyfile, groups[i], "path", NULL);
 		} else {
 			fprintf(stderr, "Unknown calendar type `%s'\n", type);
 			return NULL;
 		}
 		g_free(type);
 
-		cfg->name = strdup(groups[i]);
+		cfg->label = strdup(groups[i]);
 		cfg->email = g_key_file_get_string(keyfile, groups[i], "email", NULL);
 		calendar_configs = g_slist_append(calendar_configs, cfg);
 	}
@@ -86,16 +85,20 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 		CalendarConfig* cfg = p->data;
 		switch (cfg->type) {
 		case CAL_TYPE_CALDAV:
-			g_key_file_set_string(keyfile, cfg->name, "type", "caldav");
-			g_key_file_set_string(keyfile, cfg->name, "url", cfg->d.caldav.url);
-			g_key_file_set_string(keyfile, cfg->name, "user", cfg->d.caldav.user);
+			g_key_file_set_string(keyfile, cfg->label, "type", "caldav");
+			g_key_file_set_string(keyfile, cfg->label, "url", cfg->location);
+			g_key_file_set_string(keyfile, cfg->label, "user", cfg->login);
+			break;
+		case CAL_TYPE_GOOGLE:
+			g_key_file_set_string(keyfile, cfg->label, "type", "google");
+			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
 		case CAL_TYPE_FILE:
-			g_key_file_set_string(keyfile, cfg->name, "type", "file");
-			g_key_file_set_string(keyfile, cfg->name, "path", cfg->d.file.path);
+			g_key_file_set_string(keyfile, cfg->label, "type", "file");
+			g_key_file_set_string(keyfile, cfg->label, "path", cfg->location);
 			break;
 		}
-		g_key_file_set_string(keyfile, cfg->name, "email", cfg->email);
+		g_key_file_set_string(keyfile, cfg->label, "email", cfg->email);
 	}
 
 	if (!g_key_file_save_to_file(keyfile, config_file, &error)) {

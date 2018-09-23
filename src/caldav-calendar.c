@@ -12,16 +12,17 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include <curl/curl.h>
-#include <libsecret/secret.h>
 #include <libxml/SAX2.h>
 
 #include "async-curl.h"
 #include "caldav-calendar.h"
+#include "remote-auth.h"
 
 struct _CaldavCalendar {
 	Calendar parent;
 	const CalendarConfig* cfg;
 	char* sync_token;
+	RemoteAuth* auth;
 	gboolean op_pending;
 	GSList* events;
 };
@@ -209,114 +210,9 @@ static void xmlctx_cleanup(XmlParseCtx* ctx)
 	g_hash_table_destroy(ctx->ns_aliases);
 }
 
-static size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* userdata)
-{
-	g_string_append_len((GString*) userdata, ptr, size * nmemb);
-	return size * nmemb;
-}
-
-/* Helper function for the common aspects of a CalDAV request */
-static CURL* new_curl_request(const CalendarConfig* cfg, const char* url, const char* pass)
-{
-	CURL* curl = curl_easy_init();
-	g_assert_nonnull(curl);
-	curl_easy_setopt(curl, CURLOPT_URL, url);
-	curl_easy_setopt(curl, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
-	curl_easy_setopt(curl, CURLOPT_USERNAME, cfg->d.caldav.user);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, pass);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
-	return curl;
-}
-
-static const SecretSchema focal_secret_schema = {
-	"net.ohwg.focal", SECRET_SCHEMA_NONE, {
-											  {"url", SECRET_SCHEMA_ATTRIBUTE_STRING},
-											  {"user", SECRET_SCHEMA_ATTRIBUTE_STRING},
-											  {"NULL", 0},
-										  }};
-
-// Simple generic structure to pass a callback function and its arguments
-// so that an action can be continued after an intermediate step. It should be
-// allocated by the caller of caldav_secret_lookup, and will be freed after
-// the callback is executed (see on_password_stored)
-typedef struct {
-	void (*func)();
-	CaldavCalendar* cal;
-	void* arg1;
-} DelayedFunctionContext;
-
-static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer user);
-
-static void caldav_secret_lookup(CaldavCalendar* rc, DelayedFunctionContext* dfc)
-{
-	secret_password_lookup(&focal_secret_schema, NULL, on_password_lookup, dfc,
-						   "url", rc->cfg->d.caldav.url,
-						   "user", rc->cfg->d.caldav.user,
-						   NULL);
-}
-
-static void on_password_stored(GObject* source, GAsyncResult* result, gpointer user)
-{
-	GError* error = NULL;
-	DelayedFunctionContext* dfc = (DelayedFunctionContext*) user;
-	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(dfc->cal);
-
-	secret_password_store_finish(result, &error);
-
-	if (error != NULL) {
-		fprintf(stderr, "error: %s\n", error->message);
-		g_error_free(error);
-		free(dfc);
-	} else {
-		// immediately look up the password again so we can continue the originally
-		// requested async operation
-		caldav_secret_lookup(rc, dfc);
-	}
-}
-
-static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer user)
-{
-	GError* error = NULL;
-	gchar* password = secret_password_lookup_finish(result, &error);
-	DelayedFunctionContext* dfc = (DelayedFunctionContext*) user;
-	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(dfc->cal);
-
-	if (error != NULL) {
-		fprintf(stderr, "error: %s\n", error->message);
-		g_error_free(error);
-	} else if (password == NULL) {
-		// no matching password found, prompt the user to create one
-		char* pass = NULL;
-		g_signal_emit_by_name(rc, "request-password", rc->cfg->name, rc->cfg->d.caldav.user, &pass);
-		if (pass) {
-			// We could just use the password here, but there's a good chance that it
-			// would be immediately required again, and the next lookup would pop up
-			// another dialog. Instead, wait until the password is stored, then trigger
-			// a lookup again with the original callback data
-			secret_password_store(&focal_secret_schema, SECRET_COLLECTION_DEFAULT, "Focal Remote Calendar password",
-								  pass, NULL, on_password_stored, dfc,
-								  "url", rc->cfg->d.caldav.url,
-								  "user", rc->cfg->d.caldav.user,
-								  NULL);
-			g_free(pass);
-			// skip free of dfc, it will be cleaned up in on_password_stored callback
-			return;
-		} else {
-			// user declined to enter password. Allow a later attempt...
-			rc->op_pending = FALSE;
-		}
-	} else {
-		rc->op_pending = FALSE;
-		(*dfc->func)(dfc->cal, password, dfc->arg1);
-		secret_password_free(password);
-	}
-	free(dfc);
-}
-
 typedef struct {
 	CaldavCalendar* cal;
 	char* url;
-	struct curl_slist* hdrs;
 	char* cal_postdata;
 	Event* old_event;
 	Event* new_event;
@@ -325,11 +221,27 @@ typedef struct {
 static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 {
 	ModifyContext* ac = (ModifyContext*) user;
-	curl_slist_free_all(ac->hdrs);
 	free(ac->cal_postdata);
 	free(ac->url);
 
 	if (ret == CURLE_OK) {
+		// RFC 4791 5.3.4 states that if the object stored on the server side is not
+		// octet-identical to the one in the PUT request, an ETag won't be supplied
+		// and we need to retrieve the object afresh.
+		if (ac->new_event && !event_get_etag(ac->new_event)) {
+			g_warning("No ETag in PUT response, triggering sync. Event LEAKS!");
+			CaldavCalendar* cc = ac->cal;
+			// Cannot call event_free because it's still being used in the display, and
+			// won't be refreshed until the sync completes. For now we accept the small
+			// leak, later it would be better to perhaps remove it from the display
+			// before triggering the sync
+			// event_free(ac->new_event);
+			g_free(ac);
+			cc->op_pending = FALSE;
+			calendar_sync(FOCAL_CALENDAR(cc));
+			return;
+		}
+
 		// "officially" append the event to the collection
 		if (ac->old_event)
 			ac->cal->events = g_slist_remove(ac->cal->events, ac->old_event);
@@ -343,6 +255,7 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
 	}
 
+	ac->cal->op_pending = FALSE;
 	g_free(ac);
 }
 
@@ -358,16 +271,18 @@ static size_t caldav_put_response_get_etag(char* ptr, size_t size, size_t nmemb,
 	return size * nmemb;
 }
 
-static void do_caldav_put(CaldavCalendar* rc, char* password, Event* event)
+static void do_caldav_put(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	ModifyContext* ac = g_new0(ModifyContext, 1);
 	ac->cal = rc;
 	ac->new_event = event;
 
-	const char* root_url = rc->cfg->d.caldav.url;
+	const char* root_url = rc->cfg->location;
 	const char* event_url = event_get_url(event);
 	if (event_url == NULL) {
-		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/'), event_get_uid(event)));
+		char* u = g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->location, ':') + 3, '/'), event_get_uid(event));
+		event_set_url(event, u);
+		g_free(u);
 		event_url = event_get_url(event);
 	}
 
@@ -375,9 +290,10 @@ static void do_caldav_put(CaldavCalendar* rc, char* password, Event* event)
 	const char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
 	asprintf(&ac->url, "%.*s%s", (int) (url_path - root_url), root_url, event_get_url(event));
 
-	CURL* curl = new_curl_request(calendar_get_config(FOCAL_CALENDAR(rc)), ac->url, password);
-	ac->hdrs = curl_slist_append(ac->hdrs, "Content-Type: text/calendar; charset=utf-8");
-	ac->hdrs = curl_slist_append(ac->hdrs, "Expect:");
+	curl_easy_setopt(curl, CURLOPT_URL, ac->url);
+
+	headers = curl_slist_append(headers, "Content-Type: text/calendar; charset=utf-8");
+	headers = curl_slist_append(headers, "Expect:");
 
 	GSList* f = g_slist_find(rc->events, event);
 	if (f)
@@ -386,22 +302,22 @@ static void do_caldav_put(CaldavCalendar* rc, char* password, Event* event)
 	if (ac->old_event) {
 		char* match;
 		asprintf(&match, "If-Match: %s", event_get_etag(ac->old_event));
-		ac->hdrs = curl_slist_append(ac->hdrs, match);
+		headers = curl_slist_append(headers, match);
 		free(match);
 	} else {
-		ac->hdrs = curl_slist_append(ac->hdrs, "If-None-Match: *");
+		headers = curl_slist_append(headers, "If-None-Match: *");
 	}
 
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, ac->hdrs);
 	ac->cal_postdata = event_as_ical_string(ac->new_event);
+
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, ac->cal_postdata);
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, strlen(ac->cal_postdata));
 
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, ac->new_event);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, caldav_put_response_get_etag);
 
-	async_curl_add_request(curl, caldav_modify_done, ac);
+	async_curl_add_request(curl, headers, caldav_modify_done, ac);
 }
 
 #define ENSURE_EXCLUSIVE(rc)                                                                   \
@@ -417,42 +333,36 @@ static void save_event(Calendar* c, Event* event)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
-
-	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
-	dfc->cal = rc;
-	dfc->func = do_caldav_put;
-	dfc->arg1 = event;
-
-	caldav_secret_lookup(rc, dfc);
+	remote_auth_new_request(rc->auth, do_caldav_put, event);
 }
 
-static void do_delete_event(CaldavCalendar* rc, const char* password, Event* event)
+static void do_delete_event(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	ModifyContext* pc = g_new0(ModifyContext, 1);
 	pc->cal = rc;
 	pc->old_event = event;
 	// TODO is this if stmt really needed?
-	const char* root_url = rc->cfg->d.caldav.url;
+	const char* root_url = rc->cfg->location;
 	const char* event_url = event_get_url(event);
 	g_assert(event_url);
 	if (event_url == NULL) {
-		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->d.caldav.url, ':') + 3, '/'), event_get_uid(event)));
+		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->location, ':') + 3, '/'), event_get_uid(event)));
 		event_url = event_get_url(event);
 	}
 
 	char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
 	asprintf(&pc->url, "%.*s%s", (int) (url_path - root_url), root_url, event_url);
 
-	CURL* curl = new_curl_request(rc->cfg, pc->url, password);
+	curl_easy_setopt(curl, CURLOPT_URL, pc->url);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
 
 	// set the If-Match header
 	char* match;
 	asprintf(&match, "If-Match: %s", event_get_etag(event));
-	pc->hdrs = curl_slist_append(pc->hdrs, match);
+	headers = curl_slist_append(headers, match);
 	free(match);
 
-	async_curl_add_request(curl, caldav_modify_done, pc);
+	async_curl_add_request(curl, headers, caldav_modify_done, pc);
 }
 
 static void delete_event(Calendar* c, Event* event)
@@ -464,12 +374,7 @@ static void delete_event(Calendar* c, Event* event)
 	if (!event_get_etag(event))
 		return;
 
-	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
-	dfc->cal = rc;
-	dfc->func = do_delete_event;
-	dfc->arg1 = event;
-
-	caldav_secret_lookup(rc, dfc);
+	remote_auth_new_request(rc->auth, do_delete_event, event);
 }
 
 static void each_event(Calendar* c, CalendarEachEventCallback callback, void* user)
@@ -511,7 +416,6 @@ static void caldav_entry_free(CaldavEntry* cde)
 
 typedef struct {
 	CaldavCalendar* cal;
-	struct curl_slist* hdrs;
 	GString* report_req;
 	GString* report_resp;
 } SyncContext;
@@ -521,8 +425,6 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 	SyncContext* sc = (SyncContext*) user;
 	CaldavCalendar* rc = sc->cal;
 
-	// No matter what happened, these are no longer needed
-	curl_slist_free_all(sc->hdrs);
 	g_string_free(sc->report_req, TRUE);
 
 	// Debug
@@ -620,7 +522,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 	g_signal_emit_by_name(rc, "sync-done", 0);
 }
 
-static void do_multiget_events(CaldavCalendar* rc, const char* password, GSList* hrefs)
+static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, GSList* hrefs)
 {
 	SyncContext* sc = g_new0(SyncContext, 1);
 	sc->cal = rc;
@@ -630,12 +532,11 @@ static void do_multiget_events(CaldavCalendar* rc, const char* password, GSList*
 	// Here we instead use a calendar-multiget REPORT for efficiency.
 	// See https://tools.ietf.org/html/rfc6578#appendix-B
 
-	CURL* curl = new_curl_request(rc->cfg, rc->cfg->d.caldav.url, password);
+	curl_easy_setopt(curl, CURLOPT_URL, rc->cfg->location);
 
-	sc->hdrs = curl_slist_append(NULL, "Depth: 1");
-	sc->hdrs = curl_slist_append(sc->hdrs, "Prefer: return-minimal");
-	sc->hdrs = curl_slist_append(sc->hdrs, "Content-Type: application/xml; charset=utf-8");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, sc->hdrs);
+	headers = curl_slist_append(headers, "Depth: 1");
+	headers = curl_slist_append(headers, "Prefer: return-minimal");
+	headers = curl_slist_append(headers, "Content-Type: application/xml; charset=utf-8");
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
 
 	// Build the query
@@ -660,16 +561,16 @@ static void do_multiget_events(CaldavCalendar* rc, const char* password, GSList*
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, sc->report_resp);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
 
-	async_curl_add_request(curl, sync_multiget_report_done, sc);
+	async_curl_add_request(curl, headers, sync_multiget_report_done, sc);
 }
+
+static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers);
 
 static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 {
 	SyncContext* sc = (SyncContext*) user;
 	CaldavCalendar* rc = sc->cal;
 
-	// No matter what happened, these are no longer needed
-	curl_slist_free_all(sc->hdrs);
 	g_string_free(sc->report_req, TRUE);
 
 	// Debug
@@ -683,6 +584,16 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		g_string_free(sc->report_resp, TRUE);
 		free(sc);
 		return;
+	}
+
+	long response_code;
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+	if (response_code == 401) {
+		g_warning("401 Unauthorized. Assuming auth token has expired and attempting refresh");
+		remote_auth_invalidate_credential(rc->auth, do_caldav_sync, NULL);
+		return;
+	} else if (response_code != 207) {
+		g_critical("unexpected response code %ld", response_code);
 	}
 
 	// Parse the response
@@ -738,31 +649,26 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		return;
 	}
 
-	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
-	dfc->func = do_multiget_events;
-	dfc->cal = rc;
-	dfc->arg1 = hrefs;
-
-	caldav_secret_lookup(rc, dfc);
+	remote_auth_new_request(rc->auth, do_multiget_events, hrefs);
 }
 
-static void do_caldav_sync(CaldavCalendar* rc, const char* password)
+static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers)
 {
 	// Begin sync operation. According to RFC6578, the first step is to send
 	// a sync-collection REPORT to retrieve a list of hrefs that have been
 	// updated since the last call to the API (identified by the sync-token)
 	// See https://tools.ietf.org/html/rfc6578#appendix-B
 
-	CURL* curl = new_curl_request(rc->cfg, rc->cfg->d.caldav.url, password);
+	curl_easy_setopt(curl, CURLOPT_URL, rc->cfg->location);
 
 	// Userdata for the sync operation
 	SyncContext* sc = g_new0(SyncContext, 1);
 	sc->cal = rc;
 
-	sc->hdrs = curl_slist_append(sc->hdrs, "Depth: 1");
-	sc->hdrs = curl_slist_append(sc->hdrs, "Prefer: return-minimal");
-	sc->hdrs = curl_slist_append(sc->hdrs, "Content-Type: application/xml; charset=utf-8");
-	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, sc->hdrs);
+	headers = curl_slist_append(headers, "Depth: 1");
+	headers = curl_slist_append(headers, "Prefer: return-minimal");
+	headers = curl_slist_append(headers, "Content-Type: application/xml; charset=utf-8");
+	curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "REPORT");
 
 	sc->report_req = g_string_new("");
@@ -770,17 +676,16 @@ static void do_caldav_sync(CaldavCalendar* rc, const char* password)
 						   "<d:sync-collection xmlns:d=\"DAV:\" xmlns:c=\"urn:ietf:params:xml:ns:caldav\">"
 						   "  <d:sync-token>%s</d:sync-token>"
 						   "  <d:sync-level>infinite</d:sync-level>"
-						   "  <d:prop/>" // dav:prop always required by sabredav
+						   "  <d:prop><d:getetag/></d:prop>" // dav:prop always required by sabredav, getetag required by google
 						   "</d:sync-collection>",
 						   rc->sync_token);
-
 	curl_easy_setopt(curl, CURLOPT_POSTFIELDS, sc->report_req->str);
 
 	sc->report_resp = g_string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, sc->report_resp);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
 
-	async_curl_add_request(curl, sync_collection_report_done, sc);
+	async_curl_add_request(curl, headers, sync_collection_report_done, sc);
 }
 
 static void caldav_sync(Calendar* c)
@@ -788,16 +693,13 @@ static void caldav_sync(Calendar* c)
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
 
-	DelayedFunctionContext* dfc = g_new0(DelayedFunctionContext, 1);
-	dfc->func = do_caldav_sync;
-	dfc->cal = rc;
-
-	caldav_secret_lookup(rc, dfc);
+	remote_auth_new_request(rc->auth, do_caldav_sync, NULL);
 }
 
 static void finalize(GObject* gobject)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(gobject);
+	remote_auth_free(rc->auth);
 	free(rc->sync_token);
 	free_events(rc);
 	G_OBJECT_CLASS(caldav_calendar_parent_class)->finalize(gobject);
@@ -816,20 +718,21 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
-Calendar* caldav_calendar_new(const CalendarConfig* cfg)
+static void caldav_auth_cancelled(void* user)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(user);
+	rc->op_pending = FALSE;
+}
+
+Calendar* caldav_calendar_new(CalendarConfig* cfg)
 {
 	CaldavCalendar* rc = g_object_new(CALDAV_CALENDAR_TYPE, NULL);
 	// url must end with a slash. TODO don't assert
-	g_assert_true(strrchr(cfg->d.caldav.url, '/')[1] == 0);
+	g_assert_true(strrchr(cfg->location, '/')[1] == 0);
 	rc->cfg = cfg;
 	rc->events = NULL;
 	rc->sync_token = g_strdup("");
+	rc->auth = remote_auth_new(cfg, rc);
+	remote_auth_set_declined_callback(rc->auth, caldav_auth_cancelled);
 	return (Calendar*) rc;
-}
-
-void caldav_calendar_free(CaldavCalendar* rc)
-{
-	free(rc->sync_token);
-	free_events(rc);
-	g_free(rc);
 }

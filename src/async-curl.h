@@ -18,10 +18,24 @@
 
 typedef void (*AsyncCurlCallback)(CURL* handle, CURLcode ret, void* user);
 
+// Call once at start of application. Configures libcurl-multi.
 void async_curl_init();
 
-void async_curl_add_request(CURL* handle, AsyncCurlCallback cb, void* user);
+// Helper method to fill a GString with a CURL handle's HTTP response body.
+// Usage:
+//   GString* str = g_string_new(NULL);
+//   curl_easy_setopt(curl, CURLOPT_WRITEDATA, str);
+//   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
+// Remember to free the GString afterwards.
+size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* userdata);
 
+// Adds a CURL request to be performed asynchronously. The CURL* handle
+// and the headers list will be freed automatically when the request finishes
+// (ownership transferred). The headers list may be NULL. The callback will
+// be invoked when the request completes.
+void async_curl_add_request(CURL* handle, struct curl_slist* headers, AsyncCurlCallback cb, void* user);
+
+// Call once before application exit. Cleans up libcurl multi.
 void async_curl_cleanup();
 
 #endif //ASYNC_CURL_H

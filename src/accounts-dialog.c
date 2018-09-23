@@ -34,7 +34,7 @@ static void populate_account_list(AccountsDialog* dialog)
 	gtk_container_forall(GTK_CONTAINER(dialog->list), (GtkCallback) gtk_widget_destroy, NULL);
 	for (GSList* p = dialog->accounts; p; p = p->next) {
 		CalendarConfig* cfg = (CalendarConfig*) p->data;
-		gtk_container_add(GTK_CONTAINER(dialog->list), gtk_label_new(cfg->name));
+		gtk_container_add(GTK_CONTAINER(dialog->list), gtk_label_new(cfg->label));
 	}
 	gtk_widget_show_all(dialog->list);
 }

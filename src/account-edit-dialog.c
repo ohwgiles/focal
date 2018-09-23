@@ -13,6 +13,7 @@
  */
 #include "account-edit-dialog.h"
 #include "calendar-config.h"
+#include "remote-auth.h"
 
 struct _AccountEditDialog {
 	GtkDialog parent;
@@ -23,9 +24,28 @@ struct _AccountEditDialog {
 	GtkWidget* file_path;
 	GtkWidget* caldav_url;
 	GtkWidget* caldav_user;
+	RemoteAuth* auth;
 	CalendarConfig* config;
 };
 G_DEFINE_TYPE(AccountEditDialog, account_edit_dialog, GTK_TYPE_DIALOG);
+
+static void on_auth_success(AccountEditDialog* dialog)
+{
+	// fake like OK was pressed, close the dialog
+	g_signal_emit_by_name(dialog, "response", GTK_RESPONSE_OK);
+}
+static void dialog_response(AccountEditDialog* dialog, gint response_id);
+
+static void open_web_login(GtkWidget* button, AccountEditDialog* dialog)
+{
+	// call the dialog-response handler. This is to save the changes in the GUI to the
+	// CalendarConfig object, which is necessary so that the RemoteAuth will perform
+	// the correct type of authentication
+	dialog_response(dialog, GTK_RESPONSE_OK);
+	gtk_button_set_label(GTK_BUTTON(button), "Waiting for response");
+	remote_auth_new_request(dialog->auth, on_auth_success, NULL);
+	// TODO handle closing the window before the response comes (prevent OK, allow cancel)
+}
 
 static void edit_accounts_form_create(AccountEditDialog* dialog)
 {
@@ -41,6 +61,11 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("Username"), 0, 4, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->caldav_user, 1, 4, 1, 1);
 		break;
+	case CAL_TYPE_GOOGLE: {
+		GtkWidget* btn = gtk_button_new_with_label("Click to login");
+		g_signal_connect(btn, "clicked", (GCallback) open_web_login, dialog);
+		gtk_grid_attach(GTK_GRID(dialog->grid), btn, 0, 3, 1, 1);
+	} break;
 	case CAL_TYPE_FILE:
 		dialog->file_path = gtk_entry_new();
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("File Path"), 0, 3, 1, 1);
@@ -51,16 +76,18 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 
 static void populate_fields(AccountEditDialog* dialog)
 {
-	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name)), dialog->config->name, -1);
+	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name)), dialog->config->label, -1);
 	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email)), dialog->config->email, -1);
 	gtk_combo_box_set_active(GTK_COMBO_BOX(dialog->combo_type), (gint) dialog->config->type);
 	switch (dialog->config->type) {
 	case CAL_TYPE_CALDAV:
-		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url)), dialog->config->d.caldav.url, -1);
-		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user)), dialog->config->d.caldav.user, -1);
+		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url)), dialog->config->location, -1);
+		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user)), dialog->config->login, -1);
+		break;
+	case CAL_TYPE_GOOGLE:
 		break;
 	case CAL_TYPE_FILE:
-		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->d.file.path, -1);
+		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->location, -1);
 		break;
 	}
 }
@@ -74,27 +101,34 @@ static void account_type_changed(AccountEditDialog* dialog, GtkComboBox* account
 static void dialog_response(AccountEditDialog* dialog, gint response_id)
 {
 	if (response_id == GTK_RESPONSE_OK) {
-		free(dialog->config->name);
+		free(dialog->config->label);
 		free(dialog->config->email);
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			free(dialog->config->d.caldav.url);
-			free(dialog->config->d.caldav.user);
+			free(dialog->config->location);
+			free(dialog->config->login);
+			break;
+		case CAL_TYPE_GOOGLE:
+			free(dialog->config->location);
 			break;
 		case CAL_TYPE_FILE:
-			free(dialog->config->d.file.path);
+			free(dialog->config->location);
 			break;
 		}
 		dialog->config->type = (CalendarAccountType) gtk_combo_box_get_active(GTK_COMBO_BOX(dialog->combo_type));
-		dialog->config->name = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
+		dialog->config->label = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
 		dialog->config->email = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email))));
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			dialog->config->d.caldav.url = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
-			dialog->config->d.caldav.user = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
+			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
+			dialog->config->login = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
+			break;
+		case CAL_TYPE_GOOGLE:
+			// TODO: remove duplication with calendar_create, and handle the case where the configured email doesn't match the actual logged in one
+			dialog->config->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", dialog->config->email);
 			break;
 		case CAL_TYPE_FILE:
-			dialog->config->d.file.path = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
+			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
 			break;
 		}
 	}
@@ -147,11 +181,20 @@ GtkWidget* account_edit_dialog_new(GtkWindow* parent_window, CalendarConfig* cfg
 		populate_fields(dialog);
 	}
 
+	dialog->auth = remote_auth_new(dialog->config, dialog);
+
 	return GTK_WIDGET(dialog);
+}
+
+static void finalize(GObject* gobject)
+{
+	remote_auth_free(FOCAL_ACCOUNT_EDIT_DIALOG(gobject)->auth);
+	G_OBJECT_CLASS(account_edit_dialog_parent_class)->finalize(gobject);
 }
 
 static void account_edit_dialog_class_init(AccountEditDialogClass* klass)
 {
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 static void account_edit_dialog_init(AccountEditDialog* dialog)

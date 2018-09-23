@@ -28,6 +28,7 @@ typedef struct {
 typedef struct {
 	AsyncCurlCallback callback;
 	void* user;
+	struct curl_slist* headers;
 } CallbackInfo;
 
 static CURLM* multi;
@@ -44,6 +45,7 @@ static void check_multi_info()
 			curl_multi_remove_handle(multi, hdl);
 			(*cbinfo->callback)(hdl, msg->data.result, cbinfo->user);
 			curl_easy_cleanup(hdl);
+			curl_slist_free_all(cbinfo->headers);
 			free(cbinfo);
 		} else {
 			fprintf(stderr, "error: unexpected message %d\n", msg->msg);
@@ -111,12 +113,20 @@ static int timer_callback(CURLM* multi, long timeout_ms, void* userp)
 	return 0;
 }
 
-void async_curl_add_request(CURL* handle, AsyncCurlCallback cb, void* user)
+size_t curl_write_to_gstring(char* ptr, size_t size, size_t nmemb, void* userdata)
+{
+	g_string_append_len((GString*) userdata, ptr, size * nmemb);
+	return size * nmemb;
+}
+
+void async_curl_add_request(CURL* handle, struct curl_slist* headers, AsyncCurlCallback cb, void* user)
 {
 	g_assert_nonnull(multi);
 	CallbackInfo* cbinfo = (CallbackInfo*) malloc(sizeof(CallbackInfo));
 	cbinfo->callback = cb;
 	cbinfo->user = user;
+	cbinfo->headers = headers;
+	curl_easy_setopt(handle, CURLOPT_HTTPHEADER, headers);
 	curl_easy_setopt(handle, CURLOPT_PRIVATE, cbinfo);
 	curl_multi_add_handle(multi, handle);
 

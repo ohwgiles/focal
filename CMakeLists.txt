@@ -30,6 +30,10 @@ include_directories(${ICAL_INCLUDE_DIRS})
 pkg_check_modules(LIBSECRET REQUIRED libsecret-1)
 include_directories(${LIBSECRET_INCLUDE_DIRS})
 
+# json-glib
+pkg_check_modules(JSONGLIB REQUIRED json-glib-1.0)
+include_directories(${JSONGLIB_INCLUDE_DIRS})
+
 # executable
 add_executable(${PROJECT_NAME}
 	src/accounts-dialog.c
@@ -44,6 +48,7 @@ add_executable(${PROJECT_NAME}
 	src/event.c
 	src/local-calendar.c
 	src/main.c
+	src/remote-auth.c
 	src/week-view.c
 )
 
@@ -53,6 +58,7 @@ target_link_libraries(${PROJECT_NAME}
 	${CURL_LIBRARIES}
 	${ICAL_LIBRARIES}
 	${LIBSECRET_LIBRARIES}
+	${JSONGLIB_LIBRARIES}
 )
 
 install(TARGETS ${PROJECT_NAME} RUNTIME DESTINATION bin)

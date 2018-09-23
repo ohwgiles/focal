@@ -7,3 +7,4 @@ Icon=x-office-calendar
 Type=Application
 Categories=Calendar;Office;
 MimeType=text/calendar;
+MimeType=x-scheme-handler/net.ohwg.focal;

@@ -134,10 +134,3 @@ Calendar* local_calendar_new(const char* path)
 	lc->path = g_strdup(path);
 	return (Calendar*) lc;
 }
-
-void local_calendar_free(LocalCalendar* lc)
-{
-	free_events(lc);
-	g_free(lc->path);
-	g_free(lc);
-}

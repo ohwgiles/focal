@@ -73,7 +73,6 @@ struct icaldurationtype event_get_duration(Event* ev)
 
 const char* event_get_etag(Event* ev)
 {
-	g_assert(ev->etag);
 	return ev->etag;
 }
 
@@ -284,6 +283,8 @@ char* event_as_ical_string(Event* ev)
 		parent = icalcomponent_new_vcalendar();
 		icalcomponent_add_property(parent, icalproperty_new_version("2.0"));
 		icalcomponent_add_property(parent, icalproperty_new_prodid("-//OHWG//FOCAL"));
+		icaltimetype dtstart = icalcomponent_get_dtstart(ev->cmp);
+		icalcomponent_add_component(parent, icalcomponent_new_clone(icaltimezone_get_component((icaltimezone*) dtstart.zone)));
 		icalcomponent_add_component(parent, ev->cmp);
 	}
 
@@ -298,7 +299,11 @@ void event_save(Event* ev)
 
 void event_free(Event* ev)
 {
-	icalcomponent_free(ev->cmp);
+	icalcomponent* parent = icalcomponent_get_parent(ev->cmp);
+	if (parent)
+		icalcomponent_free(parent);
+	else
+		icalcomponent_free(ev->cmp);
 	free(ev->etag);
 	free(ev->url);
 	g_free(ev);
