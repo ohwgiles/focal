@@ -1,5 +1,7 @@
 # focal
 
+![screenshot](https://user-images.githubusercontent.com/1444499/45927628-c5ab1000-bf3e-11e8-9f70-1685f96b0b08.png)
+
 Focal is a desktop calendar application for Linux.
 
 Focal intends to be a powerful but lightweight calendar suitable for busy work environments. This means 1st-class support for remotely hosted calendars (CalDAV), a complete week view, and advanced scheduling features.
