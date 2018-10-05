@@ -31,10 +31,11 @@ typedef struct _EventWidget EventWidget;
 struct _WeekView {
 	GtkDrawingArea drawing_area;
 	int x, y, width, height;
-	int scroll_pos;
+	double scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
 	EventWidget* events_week[7];
+	EventWidget* events_allday[7];
 	int current_week; // 1-based, note libical is 0-based
 	int current_year;
 	icaltimezone* current_tz;
@@ -63,11 +64,17 @@ enum {
 };
 
 #define HEADER_HEIGHT 35.5
+#define ALLDAY_HEIGHT 20.0
+
+static gboolean has_all_day(WeekView* wv)
+{
+	return wv->events_allday[0] || wv->events_allday[1] || wv->events_allday[2] || wv->events_allday[3] || wv->events_allday[4] || wv->events_allday[5] || wv->events_allday[6];
+}
 
 // Implemented from GtkScrollable, causes the scroll bar to start below the header
 static gboolean get_border(GtkScrollable* scrollable, GtkBorder* border)
 {
-	border->top = HEADER_HEIGHT;
+	border->top = HEADER_HEIGHT + (has_all_day(FOCAL_WEEK_VIEW(scrollable)) ? ALLDAY_HEIGHT : 0);
 	return TRUE;
 }
 
@@ -81,6 +88,22 @@ G_DEFINE_TYPE_WITH_CODE(WeekView, week_view, GTK_TYPE_DRAWING_AREA, G_IMPLEMENT_
 #define SIDEBAR_WIDTH 25.5
 #define HALFHOUR_HEIGHT 30.0
 
+static void draw_event(cairo_t* cr, Event* tmp, PangoLayout* layout, double x, double y, int width, int height)
+{
+	GdkRGBA* color = event_get_color(tmp);
+	cairo_set_source_rgba(cr, color->red, color->green, color->blue, color->alpha - (event_get_dirty(tmp) ? 0.3 : 0.0));
+	cairo_rectangle(cr, x + 1, y + 1, width - 2, height - 2);
+	cairo_fill(cr);
+
+	pango_layout_set_width(layout, PANGO_SCALE * (width - 8));
+	pango_layout_set_height(layout, PANGO_SCALE * (height - 2));
+	pango_layout_set_text(layout, event_get_summary(tmp), -1);
+
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_move_to(cr, x + 3, y + 1);
+	pango_cairo_show_layout(cr, layout);
+}
+
 static void week_view_draw(WeekView* wv, cairo_t* cr)
 {
 	const int num_days = 7;
@@ -90,14 +113,16 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	cairo_set_source_rgb(cr, dark, dark, dark);
 	cairo_set_line_width(cr, 1.0);
 
-	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT + 1;
-
+	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT;
+	const int day_width = (double) (wv->width - SIDEBAR_WIDTH) / num_days;
 	cairo_select_font_face(cr, "sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_NORMAL);
 
 	cairo_set_font_size(cr, 12);
 
+	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+
 	for (int hh = first_visible_halfhour;; ++hh) {
-		double y = wv->y + HEADER_HEIGHT + hh * HALFHOUR_HEIGHT - wv->scroll_pos;
+		double y = wv->y + day_begin_yoffset + hh * HALFHOUR_HEIGHT - (int) wv->scroll_pos;
 		if (y > wv->y + wv->height)
 			break;
 		if (hh % 2 == 0) {
@@ -121,8 +146,53 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		}
 	}
 
+	PangoLayout* layout = pango_cairo_create_layout(cr);
+	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
+	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
+
+	PangoFontDescription* font_desc = pango_font_description_from_string("sans 9");
+	pango_layout_set_font_description(layout, font_desc);
+	pango_font_description_free(font_desc);
+
+	// draw events
+	for (int d = 0; d < num_days; ++d) {
+		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
+			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
+			draw_event(cr, tmp->ev, layout,
+					   wv->x + SIDEBAR_WIDTH + d * day_width,
+					   tmp->minutes_from * yminutescale + wv->y + day_begin_yoffset - (int) wv->scroll_pos,
+					   day_width,
+					   (tmp->minutes_to - tmp->minutes_from) * yminutescale);
+		}
+	}
+
+	if (wv->now.visible) {
+		double nowY = wv->y + day_begin_yoffset + wv->now.minutes * HALFHOUR_HEIGHT / 30 - (int) wv->scroll_pos;
+		cairo_set_source_rgb(cr, 1, 0, 0);
+		cairo_set_dash(cr, NULL, 0, 0);
+		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + wv->now.dow * day_width, nowY);
+		cairo_rel_line_to(cr, day_width, 0);
+		cairo_stroke(cr);
+	}
+
+	// header
+	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_rectangle(cr, 0, 0, wv->width, day_begin_yoffset);
+	cairo_fill(cr);
+
+	// all-day events
+	for (int d = 0; d < num_days; ++d) {
+		for (EventWidget* tmp = wv->events_allday[d]; tmp; tmp = tmp->next) {
+			draw_event(cr, tmp->ev, layout,
+					   wv->x + SIDEBAR_WIDTH + d * day_width,
+					   wv->y + HEADER_HEIGHT,
+					   day_width,
+					   ALLDAY_HEIGHT);
+		}
+	}
+	g_object_unref(layout);
+
 	// draw vertical lines for days
-	const int day_width = (double) (wv->width - SIDEBAR_WIDTH) / num_days;
 	cairo_set_dash(cr, NULL, 0, 0);
 	time_t t = wv->current_view.start;
 	for (int d = 0; d < num_days; ++d, t += 60 * 60 * 24) {
@@ -148,51 +218,14 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		cairo_rel_line_to(cr, 0, wv->height);
 		cairo_stroke(cr);
 	}
+
 	// top bar
+	cairo_set_source_rgb(cr, dark, dark, dark);
 	cairo_move_to(cr, wv->x, wv->y + HEADER_HEIGHT);
 	cairo_rel_line_to(cr, wv->width, 0);
-	cairo_set_source_rgb(cr, dark, dark, dark);
+	cairo_move_to(cr, wv->x, wv->y + day_begin_yoffset);
+	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_stroke(cr);
-
-	PangoLayout* layout = pango_cairo_create_layout(cr);
-	pango_layout_set_wrap(layout, PANGO_WRAP_WORD_CHAR);
-	pango_layout_set_ellipsize(layout, PANGO_ELLIPSIZE_END);
-
-	PangoFontDescription* font_desc = pango_font_description_from_string("sans 9");
-	pango_layout_set_font_description(layout, font_desc);
-	pango_font_description_free(font_desc);
-
-	// draw events
-	for (int d = 0; d < num_days; ++d) {
-		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
-			double yminutescale = HALFHOUR_HEIGHT / 30.0; //(cal->height - header_height) / (60.0 * num_hours_displayed);
-			double yfrom = tmp->minutes_from * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_pos;
-			double yto = tmp->minutes_to * yminutescale + wv->y + HEADER_HEIGHT - wv->scroll_pos;
-			double x = wv->x + SIDEBAR_WIDTH + d * day_width;
-			GdkRGBA* color = event_get_color(tmp->ev);
-			cairo_set_source_rgba(cr, color->red, color->green, color->blue, color->alpha - (event_get_dirty(tmp->ev) ? 0.3 : 0.0));
-			cairo_rectangle(cr, x + 1, yfrom + 1, day_width - 2, yto - yfrom - 2);
-			cairo_fill(cr);
-
-			pango_layout_set_width(layout, PANGO_SCALE * (day_width - 8));
-			pango_layout_set_height(layout, PANGO_SCALE * (yto - yfrom - 2));
-			pango_layout_set_text(layout, event_get_summary(tmp->ev), -1);
-
-			cairo_set_source_rgb(cr, 1, 1, 1);
-			cairo_move_to(cr, x + 3, yfrom + 1);
-			pango_cairo_show_layout(cr, layout);
-		}
-	}
-	g_object_unref(layout);
-
-	if (wv->now.visible) {
-		double nowY = wv->y + HEADER_HEIGHT + wv->now.minutes * HALFHOUR_HEIGHT / 30 - wv->scroll_pos;
-		cairo_set_source_rgb(cr, 1, 0, 0);
-		cairo_set_dash(cr, NULL, 0, 0);
-		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + wv->now.dow * day_width, nowY);
-		cairo_rel_line_to(cr, day_width, 0);
-		cairo_stroke(cr);
-	}
 }
 
 static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data)
@@ -205,56 +238,77 @@ static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data
 static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointer data)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(widget);
-	if (event->button == GDK_BUTTON_PRIMARY) {
-		// look for collisions
-		if (event->x < SIDEBAR_WIDTH || event->y < HEADER_HEIGHT)
-			return TRUE;
+	if (event->button != GDK_BUTTON_PRIMARY)
+		return TRUE;
 
-		int dow = 7 * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
-		int minutesAt = (event->y - HEADER_HEIGHT + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
+	if (event->x < SIDEBAR_WIDTH)
+		return TRUE;
 
-		EventWidget* tmp;
-		for (tmp = wv->events_week[dow]; tmp; tmp = tmp->next) {
-			if (tmp->minutes_from < minutesAt && minutesAt < tmp->minutes_to) {
+	// look for collisions
+	const int dow = 7 * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
+	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+	const gboolean all_day = event->y < day_begin_yoffset;
+	const int minutesAt = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
+
+	EventWidget* ew = NULL;
+	GdkRectangle rect;
+	rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+	rect.x = dow * rect.width + SIDEBAR_WIDTH;
+
+	if (all_day) {
+		if (wv->events_allday[dow])
+			ew = wv->events_allday[dow];
+
+		rect.y = HEADER_HEIGHT;
+		rect.height = ALLDAY_HEIGHT;
+	} else {
+		// regular events
+		for (ew = wv->events_week[dow]; ew; ew = ew->next) {
+			if (ew->minutes_from < minutesAt && minutesAt < ew->minutes_to) {
 				break;
 			}
 		}
+	}
 
-		GdkRectangle rect;
-		if (tmp) {
-			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
-			rect.x = dow * rect.width + SIDEBAR_WIDTH;
-			rect.y = HEADER_HEIGHT + (tmp->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
-			rect.height = (tmp->minutes_to - tmp->minutes_from) * HALFHOUR_HEIGHT / 30;
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, tmp->ev, &rect);
-		} else if (event->type == GDK_2BUTTON_PRESS) {
-			// double-click: request to create an event
+	if (ew) {
+		if (!all_day) {
+			rect.y = day_begin_yoffset + (ew->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+			rect.height = (ew->minutes_to - ew->minutes_from) * HALFHOUR_HEIGHT / 30;
+		}
+		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ew->ev, &rect);
+
+	} else if (event->type == GDK_2BUTTON_PRESS) {
+		// double-click: request to create an event
+		time_t at = wv->current_view.start + dow * 24 * 3600;
+		icaltimetype dtstart, dtend;
+
+		if (all_day) {
+			dtstart = dtend = icaltime_from_timet_with_zone(at, TRUE, wv->current_tz);
+		} else {
 			// dtstart: round down to closest quarter-hour
-			time_t at = wv->current_view.start + dow * 24 * 3600 + 15 * (minutesAt / 15) * 60;
-			icaltimetype dtstart = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
-			// https://github.com/libical/libical/blob/master/src/test/timezones.c#L96
-			dtstart.zone = wv->current_tz;
-			icaltimetype dtend = dtstart;
+			at += 15 * (minutesAt / 15) * 60;
+			dtstart = dtend = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
 			// duration: default event is 30min long
 			icaltime_adjust(&dtend, 0, 0, 30, 0);
-			Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
-
-			/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
-			event_set_calendar(ev, wv->calendars->data);
-
-			rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
-			rect.x = dow * rect.width + SIDEBAR_WIDTH;
-			rect.y = HEADER_HEIGHT + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+			rect.y = day_begin_yoffset + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
-
-			week_view_add_event(wv, ev);
-			gtk_widget_queue_draw((GtkWidget*) wv);
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
-		} else {
-			// deselect
-			g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 		}
+		// https://github.com/libical/libical/blob/master/src/test/timezones.c#L96
+		dtstart.zone = dtend.zone = wv->current_tz;
+
+		Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
+
+		/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
+		event_set_calendar(ev, wv->calendars->data);
+
+		week_view_add_event(wv, ev);
+		gtk_widget_queue_draw((GtkWidget*) wv);
+		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
+	} else {
+		// deselect
+		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 	}
+
 	return TRUE;
 }
 
@@ -307,19 +361,30 @@ static void week_view_dispose(GObject* gobject)
 	g_clear_object(&wv->adj);
 }
 
+static void clear_all_events(WeekView* wv)
+{
+	for (int i = 0; i < 7; ++i) {
+		for (EventWidget* p = wv->events_week[i]; p;) {
+			EventWidget* next = p->next;
+			free(p);
+			p = next;
+		}
+		wv->events_week[i] = NULL;
+		for (EventWidget* p = wv->events_allday[i]; p;) {
+			EventWidget* next = p->next;
+			free(p);
+			p = next;
+		}
+		wv->events_allday[i] = NULL;
+	}
+}
+
 static void week_view_finalize(GObject* gobject)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(gobject);
 	icaltimezone_free(wv->current_tz, TRUE);
 	g_slist_free(wv->calendars);
-	for (int i = 0; i < 7; ++i) {
-		EventWidget* ew = wv->events_week[i];
-		while (ew) {
-			EventWidget* next = ew->next;
-			free(ew);
-			ew = next;
-		}
-	}
+	clear_all_events(wv);
 }
 
 static void week_view_class_init(WeekViewClass* klass)
@@ -350,7 +415,7 @@ static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpoint
 	gtk_adjustment_configure(wv->adj,
 							 wv->scroll_pos,
 							 0,
-							 24 * 2 * HALFHOUR_HEIGHT + HEADER_HEIGHT,
+							 24 * 2 * HALFHOUR_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0),
 							 0.1 * wv->height,
 							 0.9 * wv->height,
 							 wv->height);
@@ -432,22 +497,27 @@ static void event_widget_set_extents(EventWidget* w, icaltimetype start, struct 
 
 static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurationtype duration, gpointer user)
 {
-	WeekView* cw = FOCAL_WEEK_VIEW(user);
+	WeekView* wv = FOCAL_WEEK_VIEW(user);
 
 	// crude faster filter
 	// TODO what if the week overlaps a year boundary?
-	if (next.year < cw->current_year || next.year > cw->current_year)
+	if (next.year < wv->current_year || next.year > wv->current_year)
 		return;
 
 	// exact check
 	icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
-	if (icaltime_span_overlaps(&span, &cw->current_view)) {
+	if (icaltime_span_overlaps(&span, &wv->current_view)) {
 		int dow = icaltime_day_of_week(next) - 1;
 		EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 		w->ev = ev;
-		event_widget_set_extents(w, next, duration);
-		w->next = cw->events_week[dow];
-		cw->events_week[dow] = w;
+		if (next.is_date) {
+			w->next = wv->events_allday[dow];
+			wv->events_allday[dow] = w;
+		} else {
+			event_widget_set_extents(w, next, duration);
+			w->next = wv->events_week[dow];
+			wv->events_week[dow] = w;
+		}
 	}
 }
 
@@ -470,7 +540,9 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
 	int dow = icaltime_day_of_week(dtstart) - 1;
-	for (EventWidget** ew = &wv->events_week[dow]; *ew; ew = &(*ew)->next) {
+
+	EventWidget** ll = dtstart.is_date ? &wv->events_allday[dow] : &wv->events_week[dow];
+	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
 		if ((*ew)->ev == ev) {
 			EventWidget* next = (*ew)->next;
 			free(*ew);
@@ -504,16 +576,7 @@ static int weeks_in_year(int year)
 
 static void week_view_populate_view(WeekView* wv)
 {
-	// clear all events
-	for (int i = 0; i < 7; ++i) {
-		for (EventWidget* p = wv->events_week[i]; p;) {
-			EventWidget* next = p->next;
-			free(p);
-			p = next;
-		}
-		wv->events_week[i] = NULL;
-	}
-
+	clear_all_events(wv);
 	update_view_span(wv);
 
 	time_t now = time(NULL);
@@ -552,8 +615,9 @@ void week_view_next(WeekView* wv)
 void week_view_refresh(WeekView* wv, Event* ev)
 {
 	// find corresponding EventWidget(s), there may be many if it's a recurring event
+	EventWidget** ll = event_get_dtstart(ev).is_date ? wv->events_allday : wv->events_week;
 	for (int i = 0; i < 7; ++i) {
-		for (EventWidget** ew = &wv->events_week[i]; *ew; ew = &(*ew)->next) {
+		for (EventWidget** ew = &ll[i]; *ew; ew = &(*ew)->next) {
 			if ((*ew)->ev == ev) {
 				// although dtstart may refer to a completely different day in the case
 				// of a recurring event, here we assume the hour/minute is consistent and
@@ -584,3 +648,4 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
 }
+
