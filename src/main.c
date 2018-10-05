@@ -20,6 +20,8 @@
 #include <curl/curl.h>
 #include <gtk/gtk.h>
 #include <libical/ical.h>
+#include <stdlib.h>
+#include <string.h>
 #include <strings.h>
 
 #define FOCAL_TYPE_APP (focal_app_get_type())

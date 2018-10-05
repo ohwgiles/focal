@@ -13,6 +13,7 @@
  */
 #include <curl/curl.h>
 #include <libxml/SAX2.h>
+#include <string.h>
 
 #include "async-curl.h"
 #include "caldav-calendar.h"

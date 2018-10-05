@@ -14,6 +14,9 @@
 #include "event.h"
 #include "calendar.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 struct _Event {
 	icalcomponent* cmp;
 	Calendar* cal;

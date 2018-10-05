@@ -17,6 +17,8 @@
 #include <gtk/gtk.h>
 #include <json-glib/json-glib.h>
 #include <libsecret/secret.h>
+#include <stdlib.h>
+#include <string.h>
 
 #define FOCAL_GOOGLE_CLIENT_ID "96466437028-gee73t1rh4t84r4ddf1i17ucpdf8hr3s.apps.googleusercontent.com"
 
@@ -397,7 +399,11 @@ void remote_auth_new_request(RemoteAuth* ba, void (*callback)(), void* arg)
 
 	if (ba->cfg->type == CAL_TYPE_GOOGLE && ba->cfg->cookie == NULL) {
 		g_warning("cookie is unset, generating new");
-		ba->cfg->cookie = g_uuid_string_random();
+		static const char charset[] = "abcdefghijklmnopqrstuvwxyz0123456789";
+		ba->cfg->cookie = malloc(25);
+		for (int i = 0; i < 24; ++i)
+			ba->cfg->cookie[i] = charset[rand() % sizeof(charset)];
+		ba->cfg->cookie[24] = '\0';
 	}
 
 	if (ba->cfg->type == CAL_TYPE_CALDAV)

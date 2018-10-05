@@ -15,6 +15,9 @@
 #include "calendar-config.h"
 #include "remote-auth.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 struct _AccountEditDialog {
 	GtkDialog parent;
 	GtkWidget* grid;

@@ -14,6 +14,9 @@
 
 #include "calendar-config.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 void calendar_config_free(CalendarConfig* cfg)
 {
 	free(cfg->label);

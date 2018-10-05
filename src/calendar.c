@@ -90,7 +90,7 @@ GdkRGBA* calendar_get_color(Calendar* self)
 
 Calendar* calendar_create(CalendarConfig* cfg)
 {
-	Calendar* cal;
+	Calendar* cal = NULL;
 	switch (cfg->type) {
 	case CAL_TYPE_GOOGLE:
 		// TODO: remove duplication with AccountEditDialog, and handle the case where the configured email doesn't match the actual logged in one

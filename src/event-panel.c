@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include <ctype.h>
+#include <stdlib.h>
 
 #include "calendar.h"
 #include "cell-renderer-attendee-action.h"

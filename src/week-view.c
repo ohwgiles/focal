@@ -648,4 +648,3 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
 }
-
