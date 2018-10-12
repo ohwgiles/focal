@@ -1,4 +1,4 @@
-# focal
+# focal [![status](https://ci.ohwg.net/badge/focal.svg)](https://ci.ohwg.net/jobs/focal)
 
 ![screenshot](https://user-images.githubusercontent.com/1444499/45927628-c5ab1000-bf3e-11e8-9f70-1685f96b0b08.png)
 
