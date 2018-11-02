@@ -54,9 +54,10 @@ static void model_set_attendee(Event* ev, icalproperty* attendee, GtkListStore* 
 	GtkTreeIter iter;
 	gtk_list_store_append(model, &iter);
 	icalparameter* partstat = icalproperty_get_first_parameter(attendee, ICAL_PARTSTAT_PARAMETER);
+	icalparameter* cn = icalproperty_get_first_parameter(attendee, ICAL_CN_PARAMETER);
 	gtk_list_store_set(model, &iter,
 					   0, partstat ? icalparameter_get_partstat(partstat) : ICAL_PARTSTAT_NONE,
-					   1, icalproperty_get_attendee(attendee),
+					   1, cn ? icalparameter_get_cn(cn) : icalproperty_get_attendee(attendee),
 					   2, attendee,
 					   3, FALSE,
 					   -1);
