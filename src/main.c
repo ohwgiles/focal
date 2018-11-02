@@ -25,11 +25,18 @@
 #define FOCAL_TYPE_APP (focal_app_get_type())
 G_DECLARE_FINAL_TYPE(FocalApp, focal_app, FOCAL, APP, GtkApplication)
 
+typedef struct {
+	int week_start_day;
+	int week_end_day;
+} FocalPrefs;
+
 struct _FocalApp {
 	GtkApplication parent;
 	GtkWidget* mainWindow;
-	char* config_path;
-	GSList* config;
+	char* path_prefs;
+	FocalPrefs prefs;
+	char* path_accounts;
+	GSList* accounts;
 	GSList* calendars;
 	GtkWidget* weekView;
 	GtkWidget* popover;
@@ -125,7 +132,7 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 
 static void create_calendars(FocalApp* fm)
 {
-	for (GSList* p = fm->config; p; p = p->next) {
+	for (GSList* p = fm->accounts; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
@@ -165,6 +172,7 @@ static void on_calendar_menu(GtkButton* button, FocalApp* fm)
 
 	g_menu_append_section(menu_main, NULL, G_MENU_MODEL(menu_calanders));
 	g_menu_append(menu_main, "Accounts", "win.accounts");
+	g_menu_append(menu_main, "Preferences", "win.prefs");
 
 	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(menu_main));
 	gtk_popover_popdown(GTK_POPOVER(menu));
@@ -179,7 +187,7 @@ static void on_sync_clicked(GtkButton* button, FocalApp* fm)
 	}
 }
 
-static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
+static void on_accounts_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
 {
 	FocalApp* fm = (FocalApp*) user_data;
 	// remove all calendars from view and remove window action
@@ -193,25 +201,67 @@ static void on_config_changed(GtkWidget* accounts, GSList* new_config, gpointer 
 	g_slist_free_full(fm->calendars, g_object_unref);
 	fm->calendars = NULL;
 	// write new config back to file
-	calendar_config_write_to_file(fm->config_path, new_config);
+	calendar_config_write_to_file(fm->path_accounts, new_config);
 	// recreate calendars from new config
-	fm->config = new_config;
+	fm->accounts = new_config;
 	create_calendars(fm);
 }
 
 static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
 {
 	FocalApp* fm = (FocalApp*) user_data;
-	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), fm->config);
-	g_signal_connect(accounts, "config-changed", (GCallback) on_config_changed, fm);
+	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), fm->accounts);
+	g_signal_connect(accounts, "accounts-changed", (GCallback) on_accounts_changed, fm);
 	g_signal_connect(accounts, "response", G_CALLBACK(gtk_widget_destroy), NULL);
 	gtk_widget_show_all(accounts);
+}
+
+static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
+{
+	FocalApp* fm = FOCAL_APP(user_data);
+	GtkWidget* dialog = gtk_dialog_new_with_buttons("Focal", GTK_WINDOW(fm->mainWindow), GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT, "_OK", GTK_RESPONSE_OK, "_Cancel", GTK_RESPONSE_CANCEL, NULL);
+
+	GtkWidget* combo = gtk_combo_box_text_new();
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "1,7", "Monday-Sunday");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "0,6", "Sunday-Saturday");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "1,5", "Monday-Friday");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo), "0,4", "Sunday-Thursday");
+	gchar* id = g_strdup_printf("%d,%d", fm->prefs.week_start_day, fm->prefs.week_end_day);
+	gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), id);
+	g_free(id);
+
+	GtkWidget* grid = gtk_grid_new();
+	g_object_set(grid, "column-spacing", 12, "row-spacing", 9, "margin-bottom", 12, "margin-top", 12, NULL);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "<b>Display</b>", "use-markup", TRUE, "halign", GTK_ALIGN_START, NULL), 0, 0, 2, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Week span:", "halign", GTK_ALIGN_END, NULL), 0, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), combo, 1, 1, 1, 1);
+
+	GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	g_object_set(content, "margin", 6, NULL);
+	gtk_container_add(GTK_CONTAINER(content), grid);
+
+	gtk_widget_show_all(dialog);
+	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
+		sscanf(gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo)), "%d,%d", &fm->prefs.week_start_day, &fm->prefs.week_end_day);
+		// save preferences
+		GKeyFile* kf = g_key_file_new();
+		GError* err = NULL;
+		g_key_file_load_from_file(kf, fm->path_prefs, G_KEY_FILE_KEEP_COMMENTS, NULL);
+		g_key_file_set_integer(kf, "general", "week_start_day", fm->prefs.week_start_day);
+		g_key_file_set_integer(kf, "general", "week_end_day", fm->prefs.week_end_day);
+		g_key_file_save_to_file(kf, fm->path_prefs, &err);
+		g_key_file_free(kf);
+		// update view
+		week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
+	}
+	gtk_widget_destroy(dialog);
 }
 
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 	fm->weekView = week_view_new();
+	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
 	fm->eventDetail = event_panel_new();
 
 	// todo: better separation of ui from calendar models?
@@ -219,7 +269,7 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	const GActionEntry entries[] = {
 		{"accounts", open_accounts_dialog},
-	};
+		{"prefs", open_prefs_dialog}};
 
 	g_action_map_add_action_entries(G_ACTION_MAP(fm->mainWindow), entries, G_N_ELEMENTS(entries), fm);
 
@@ -270,6 +320,26 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_widget_show_all(fm->mainWindow);
 }
 
+static void load_preferences(const char* filename, FocalPrefs* out)
+{
+	// set defaults
+	out->week_start_day = 0; // Sunday
+	out->week_end_day = 6;   // Saturday
+
+	GKeyFile* kf = g_key_file_new();
+	GError* err = NULL;
+	g_key_file_load_from_file(kf, filename, G_KEY_FILE_KEEP_COMMENTS, &err);
+	if (err) {
+		g_critical(err->message);
+		g_error_free(err);
+		g_key_file_free(kf);
+		return;
+	}
+	out->week_start_day = g_key_file_get_integer(kf, "general", "week_start_day", NULL);
+	out->week_end_day = g_key_file_get_integer(kf, "general", "week_end_day", NULL);
+	g_key_file_free(kf);
+}
+
 static void focal_startup(GApplication* app)
 {
 	// needed to generate unique uuids for new events
@@ -278,15 +348,15 @@ static void focal_startup(GApplication* app)
 	async_curl_init();
 
 	FocalApp* fm = FOCAL_APP(app);
-	const char *config_dir, *home;
-	if ((config_dir = g_getenv("XDG_CONFIG_HOME")))
-		asprintf(&fm->config_path, "%s/focal.conf", config_dir);
-	else if ((home = g_getenv("HOME")))
-		asprintf(&fm->config_path, "%s/.config/focal.conf", home);
-	else
-		return (void) fprintf(stderr, "Could not find .config path\n");
 
-	fm->config = calendar_config_load_from_file(fm->config_path);
+	char* config_dir = g_strdup_printf("%s/focal", g_get_user_config_dir());
+	g_mkdir_with_parents(config_dir, 0755);
+	fm->path_prefs = g_strdup_printf("%s/prefs.conf", config_dir);
+	fm->path_accounts = g_strdup_printf("%s/accounts.conf", config_dir);
+	g_free(config_dir);
+
+	fm->accounts = calendar_config_load_from_file(fm->path_accounts);
+	load_preferences(fm->path_prefs, &fm->prefs);
 
 	g_application_activate(app);
 }
@@ -301,8 +371,9 @@ static void focal_shutdown(GApplication* app)
 {
 	FocalApp* fm = FOCAL_APP(app);
 	g_slist_free_full(fm->calendars, g_object_unref);
-	g_slist_free_full(fm->config, (GDestroyNotify) calendar_config_free);
-	free(fm->config_path);
+	g_slist_free_full(fm->accounts, (GDestroyNotify) calendar_config_free);
+	free(fm->path_accounts);
+	free(fm->path_prefs);
 	async_curl_cleanup();
 }
 

@@ -88,7 +88,7 @@ static void on_clicked_delete(AccountsDialog* dialog, GtkToolButton* button)
 
 static void accounts_dialog_class_init(AccountsDialogClass* klass)
 {
-	accounts_dialog_signals[SIGNAL_CONFIG_CHANGED] = g_signal_new("config-changed", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	accounts_dialog_signals[SIGNAL_CONFIG_CHANGED] = g_signal_new("accounts-changed", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 }
 
 static void accounts_dialog_init(AccountsDialog* self)

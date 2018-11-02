@@ -38,6 +38,8 @@ struct _WeekView {
 	EventWidget* events_allday[7];
 	int current_week; // 1-based, note libical is 0-based
 	int current_year;
+	int day_start;
+	int day_end;
 	icaltimezone* current_tz;
 	icaltime_span current_view;
 	struct {
@@ -106,7 +108,7 @@ static void draw_event(cairo_t* cr, Event* tmp, PangoLayout* layout, double x, d
 
 static void week_view_draw(WeekView* wv, cairo_t* cr)
 {
-	const int num_days = 7;
+	const int num_days = wv->day_end - wv->day_start + 1;
 	const double dashes[] = {1.0};
 
 	double dark = 0.3, med = 0.65, light = 0.85;
@@ -156,7 +158,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	// draw events
 	for (int d = 0; d < num_days; ++d) {
-		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
+		for (EventWidget* tmp = wv->events_week[d + wv->day_start]; tmp; tmp = tmp->next) {
 			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
 			draw_event(cr, tmp->ev, layout,
 					   wv->x + SIDEBAR_WIDTH + d * day_width,
@@ -170,7 +172,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		double nowY = wv->y + day_begin_yoffset + wv->now.minutes * HALFHOUR_HEIGHT / 30 - (int) wv->scroll_pos;
 		cairo_set_source_rgb(cr, 1, 0, 0);
 		cairo_set_dash(cr, NULL, 0, 0);
-		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + wv->now.dow * day_width, nowY);
+		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + (wv->now.dow - wv->day_start) * day_width, nowY);
 		cairo_rel_line_to(cr, day_width, 0);
 		cairo_stroke(cr);
 	}
@@ -194,19 +196,21 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	// draw vertical lines for days
 	cairo_set_dash(cr, NULL, 0, 0);
-	time_t t = wv->current_view.start;
-	for (int d = 0; d < num_days; ++d, t += 60 * 60 * 24) {
+	icaltimetype day = icaltime_from_timet_with_zone(wv->current_view.start, 1, wv->current_tz);
+	for (int d = 0; d < num_days; ++d, icaltime_adjust(&day, 1, 0, 0, 0)) {
 		double x = wv->x + SIDEBAR_WIDTH + d * day_width;
-
 		char daylabel[16];
-		struct tm* firstday = localtime(&t);
-		strftime(daylabel, 16, "%e", firstday);
+		time_t tt = icaltime_as_timet(day);
+		struct tm* t = localtime(&tt);
+
+		strftime(daylabel, 16, "%e", t);
 		cairo_move_to(cr, x + 5, wv->y + HEADER_HEIGHT - 5);
 		cairo_set_font_size(cr, 22);
 		cairo_set_source_rgb(cr, dark, dark, dark);
 		cairo_show_text(cr, daylabel);
 
-		strftime(daylabel, 16, "%a", firstday);
+		strftime(daylabel, 16, "%a", t);
+
 		for (char* p = daylabel; *p; ++p)
 			*p = toupper(*p);
 		cairo_move_to(cr, x + 35, wv->y + HEADER_HEIGHT - 5);
@@ -245,14 +249,15 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 		return TRUE;
 
 	// look for collisions
-	const int dow = 7 * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
+	const int num_days = (wv->day_end - wv->day_start + 1);
+	const int dow = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 	const gboolean all_day = event->y < day_begin_yoffset;
 	const int minutesAt = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
 
 	EventWidget* ew = NULL;
 	GdkRectangle rect;
-	rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+	rect.width = (wv->width - SIDEBAR_WIDTH) / num_days;
 	rect.x = dow * rect.width + SIDEBAR_WIDTH;
 
 	if (all_day) {
@@ -453,7 +458,7 @@ void update_view_span(WeekView* wv)
 {
 	// based on algorithm from https://en.wikipedia.org/wiki/ISO_week_date
 	int wd_4jan = icaltime_day_of_week(icaltime_from_day_of_year(4, wv->current_year));
-	int tmp = wv->current_week * 7 + ICAL_SUNDAY_WEEKDAY - (wd_4jan + 3); // First day of week
+	int tmp = wv->current_week * 7 + wv->day_start - (wd_4jan + 2); // First day of week
 	if (tmp < 1) {
 		tmp += icaltime_days_in_year(--wv->current_year);
 	} else if (tmp > icaltime_days_in_year(wv->current_year)) {
@@ -466,7 +471,7 @@ void update_view_span(WeekView* wv)
 	start.is_date = FALSE;
 	start.zone = wv->current_tz;
 	icaltimetype until = start;
-	icaltime_adjust(&until, 7, 0, 0, 0);
+	icaltime_adjust(&until, wv->day_end - wv->day_start + 1, 0, 0, 0);
 	wv->current_view = icaltime_span_new(start, until, 0);
 }
 
@@ -642,9 +647,17 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 
 	GdkRectangle rect;
-	rect.width = (wv->width - SIDEBAR_WIDTH) / 7;
+	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->day_end - wv->day_start + 1);
 	rect.x = (icaltime_day_of_week(dt) - 1) * rect.width + SIDEBAR_WIDTH;
 	rect.y = HEADER_HEIGHT + (dt.hour * 60 + dt.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
+}
+
+void week_view_set_day_span(WeekView* wv, int day_start, int day_end)
+{
+	wv->day_start = day_start;
+	wv->day_end = day_end;
+	update_view_span(wv);
+	gtk_widget_queue_draw((GtkWidget*) wv);
 }
