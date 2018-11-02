@@ -24,12 +24,16 @@ G_DECLARE_DERIVABLE_TYPE(Calendar, calendar, FOCAL, CALENDAR, GObject)
 
 typedef void (*CalendarEachEventCallback)(void* user, Event*);
 
+typedef struct _RemoteAuth RemoteAuth;
+
 struct _CalendarClass {
 	GObjectClass parent;
 	void (*save_event)(Calendar*, Event* event);
 	void (*delete_event)(Calendar*, Event* event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
 	void (*sync)(Calendar*);
+	/* protected */
+	void (*attach_authenticator)(Calendar*, RemoteAuth* auth);
 };
 
 void calendar_save_event(Calendar* self, Event* event);
@@ -47,6 +51,8 @@ const char* calendar_get_name(Calendar* self);
 const char* calendar_get_email(Calendar* self);
 
 GdkRGBA* calendar_get_color(Calendar* self);
+
+const char* calendar_get_location(Calendar* self);
 
 // factory method
 Calendar* calendar_create(CalendarConfig* config);

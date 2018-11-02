@@ -20,8 +20,6 @@
 #include <curl/curl.h>
 #include <gtk/gtk.h>
 #include <libical/ical.h>
-#include <stdlib.h>
-#include <string.h>
 #include <strings.h>
 
 #define FOCAL_TYPE_APP (focal_app_get_type())
@@ -314,10 +312,11 @@ static gint focal_cmdline(GApplication* application, GApplicationCommandLine* co
 	gint ret = 0;
 	gchar** argv = g_application_command_line_get_arguments(command_line, &argc);
 	for (int i = 1; i < argc; ++i) {
-		const char* auth_scheme = "net.ohwg.focal:/auth/google?";
-		if (g_ascii_strncasecmp(argv[i], auth_scheme, strlen(auth_scheme)) == 0) {
+		const char* auth_scheme = "net.ohwg.focal:/";
+		gchar* query;
+		if (g_ascii_strncasecmp(argv[i], auth_scheme, strlen(auth_scheme)) == 0 && (query = strchr(argv[i], '?'))) {
 			gchar *cookie = NULL, *code = NULL, *sp;
-			for (char* p = strtok_r(argv[i] + strlen(auth_scheme), "&", &sp); p; p = strtok_r(NULL, "&", &sp)) {
+			for (char* p = strtok_r(query + 1, "&", &sp); p; p = strtok_r(NULL, "&", &sp)) {
 				if (g_ascii_strncasecmp(p, "state=", strlen("state=")) == 0) {
 					cookie = &p[strlen("state=")];
 				} else if (g_ascii_strncasecmp(p, "code=", strlen("code=")) == 0) {

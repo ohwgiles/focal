@@ -13,9 +13,12 @@
  */
 #include "calendar.h"
 #include "calendar-config.h"
+#include "remote-auth-basic.h"
+#include "remote-auth-oauth2.h"
 
 typedef struct {
 	const CalendarConfig* config;
+	RemoteAuth* auth;
 	GdkRGBA color;
 } CalendarPrivate;
 
@@ -28,6 +31,13 @@ enum {
 };
 
 static gint calendar_signals[LAST_SIGNAL] = {0};
+
+enum {
+	PROP_0,
+	PROP_CALENDAR_CONFIG,
+	PROP_REMOTE_AUTH,
+	PROP_LAST
+};
 
 void calendar_save_event(Calendar* self, Event* event)
 {
@@ -49,12 +59,27 @@ void calendar_sync(Calendar* self)
 	FOCAL_CALENDAR_GET_CLASS(self)->sync(self);
 }
 
+static void set_property(GObject* object, guint prop_id, const GValue* value, GParamSpec* pspec)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(FOCAL_CALENDAR(object));
+	if (prop_id == PROP_CALENDAR_CONFIG) {
+		priv->config = g_value_get_pointer(value);
+	} else if (prop_id == PROP_REMOTE_AUTH) {
+		FOCAL_CALENDAR_GET_CLASS(object)->attach_authenticator(FOCAL_CALENDAR(object), g_value_get_pointer(value));
+	} else {
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
 void calendar_class_init(CalendarClass* klass)
 {
 	GObjectClass* goc = (GObjectClass*) klass;
 	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	// TODO: learn how to use G_TYPE_STRING in return value properly...
 	calendar_signals[SIGNAL_REQUEST_PASSWORD] = g_signal_new("request-password", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+	goc->set_property = set_property;
+	g_object_class_install_property(goc, PROP_CALENDAR_CONFIG, g_param_spec_pointer("cfg", "Calendar Configuration", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
+	g_object_class_install_property(goc, PROP_REMOTE_AUTH, g_param_spec_pointer("auth", "Remote Authenticator", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
 }
 
 void calendar_init(Calendar* self)
@@ -85,19 +110,31 @@ GdkRGBA* calendar_get_color(Calendar* self)
 	return &priv->color;
 }
 
+const char* calendar_get_location(Calendar* self)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return priv->config->location;
+}
+
 #include "caldav-calendar.h"
 #include "local-calendar.h"
+#include "oauth2-provider-google.h"
+#include "outlook-calendar.h"
 
 Calendar* calendar_create(CalendarConfig* cfg)
 {
-	Calendar* cal = NULL;
+	Calendar* cal;
 	switch (cfg->type) {
 	case CAL_TYPE_GOOGLE:
 		// TODO: remove duplication with AccountEditDialog, and handle the case where the configured email doesn't match the actual logged in one
 		cfg->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", cfg->email);
-		// fall through
+		cal = g_object_new(CALDAV_CALENDAR_TYPE, "cfg", cfg, "auth", g_object_new(REMOTE_AUTH_OAUTH2_TYPE, "cfg", cfg, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_GOOGLE, NULL), NULL), NULL);
+		break;
 	case CAL_TYPE_CALDAV:
-		cal = caldav_calendar_new(cfg);
+		cal = g_object_new(CALDAV_CALENDAR_TYPE, "cfg", cfg, "auth", g_object_new(REMOTE_AUTH_BASIC_TYPE, "cfg", cfg, NULL), NULL);
+		break;
+	case CAL_TYPE_OUTLOOK:
+		cal = outlook_calendar_new(cfg);
 		break;
 	case CAL_TYPE_FILE:
 		cal = local_calendar_new(cfg->location);

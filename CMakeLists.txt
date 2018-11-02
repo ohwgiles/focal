@@ -36,19 +36,25 @@ include_directories(${JSONGLIB_INCLUDE_DIRS})
 
 # executable
 add_executable(${PROJECT_NAME}
-	src/accounts-dialog.c
 	src/account-edit-dialog.c
+	src/accounts-dialog.c
 	src/async-curl.c
 	src/caldav-calendar.c
-	src/calendar-config.c
 	src/calendar.c
+	src/calendar-config.c
 	src/cell-renderer-attendee-action.c
 	src/cell-renderer-attendee-partstat.c
-	src/event-panel.c
 	src/event.c
+	src/event-panel.c
 	src/local-calendar.c
 	src/main.c
+	src/oauth2-provider.c
+	src/oauth2-provider-google.c
+	src/oauth2-provider-outlook.c
+	src/outlook-calendar.c
+	src/remote-auth-basic.c
 	src/remote-auth.c
+	src/remote-auth-oauth2.c
 	src/week-view.c
 )
 

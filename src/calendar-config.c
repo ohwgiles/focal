@@ -14,9 +14,6 @@
 
 #include "calendar-config.h"
 
-#include <stdlib.h>
-#include <string.h>
-
 void calendar_config_free(CalendarConfig* cfg)
 {
 	free(cfg->label);
@@ -34,6 +31,8 @@ const char* calendar_type_as_string(CalendarAccountType type)
 		return "CalDAV";
 	case CAL_TYPE_GOOGLE:
 		return "Google Calendar";
+	case CAL_TYPE_OUTLOOK:
+		return "Outlook 365";
 	case CAL_TYPE_FILE:
 		return "Local iCal File";
 	}
@@ -59,6 +58,9 @@ GSList* calendar_config_load_from_file(const char* config_file)
 			cfg->login = g_key_file_get_string(keyfile, groups[i], "user", NULL);
 		} else if (g_strcmp0(type, "google") == 0) {
 			cfg->type = CAL_TYPE_GOOGLE;
+			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
+		} else if (g_strcmp0(type, "outlook") == 0) {
+			cfg->type = CAL_TYPE_OUTLOOK;
 			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
 		} else if (g_strcmp0(type, "file") == 0) {
 			cfg->type = CAL_TYPE_FILE;
@@ -94,6 +96,10 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 			break;
 		case CAL_TYPE_GOOGLE:
 			g_key_file_set_string(keyfile, cfg->label, "type", "google");
+			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
+			break;
+		case CAL_TYPE_OUTLOOK:
+			g_key_file_set_string(keyfile, cfg->label, "type", "outlook");
 			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
 		case CAL_TYPE_FILE:

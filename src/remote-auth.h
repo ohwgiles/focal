@@ -23,16 +23,20 @@ typedef struct _Calendar Calendar;
 
 typedef struct _CalendarConfig CalendarConfig;
 
+#define TYPE_REMOTE_AUTH (remote_auth_get_type())
+G_DECLARE_DERIVABLE_TYPE(RemoteAuth, remote_auth, FOCAL, REMOTE_AUTH, GObject)
+
+struct _RemoteAuthClass {
+	GObjectClass parent;
+	void (*new_request)(RemoteAuth* ba, void (*callback)(), void* user, void* arg);
+	void (*invalidate_credential)(RemoteAuth* ba, void (*callback)(), void* user, void* arg);
+};
+
 // A RemoteAuth object is responsible for authenticating against a remote
 // server. The user of this API receives an authenticated CURL handle with
 // which content operations (CalDAV or other API).
 // The user pointer here is supplied as the first argument to all callbacks.
 RemoteAuth* remote_auth_new(CalendarConfig* cfg, gpointer user);
-
-// Sets a callback to be invoked when the user was prompted for credentials
-// but declined to provide them. The user of this class can use this to
-// reset its internal state or propagate the error onwards.
-void remote_auth_set_declined_callback(RemoteAuth* ba, void (*callback)(gpointer));
 
 // The primary method, this function will invoke the provided callback with
 // and authenticated CURL object. According to the CalendarConfig provided
@@ -41,14 +45,11 @@ void remote_auth_set_declined_callback(RemoteAuth* ba, void (*callback)(gpointer
 // the user if no credentials are available, storing the latest credentials
 // or tokens back in the keychain, and requesting a new OAuth2 access token
 // from the refresh token if necessary.
-void remote_auth_new_request(RemoteAuth* ba, void (*callback)(), void* arg);
+void remote_auth_new_request(RemoteAuth* ba, void (*callback)(), void* user, void* arg);
 
 // This method should be called if the provided CURL handle results in a
 // 401 Unauthorized response. It will invalidate the credential stored in
 // the keyring and trigger the process anew as in remote_auth_new_request.
-void remote_auth_invalidate_credential(RemoteAuth* ba, void (*callback)(), void* arg);
-
-// Frees all memory associated with the RemoteAuth object.
-void remote_auth_free(RemoteAuth* ba);
+void remote_auth_invalidate_credential(RemoteAuth* ba, void (*callback)(), void* user, void* arg);
 
 #endif //REMOTE_AUTH_H

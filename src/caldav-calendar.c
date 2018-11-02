@@ -13,7 +13,6 @@
  */
 #include <curl/curl.h>
 #include <libxml/SAX2.h>
-#include <string.h>
 
 #include "async-curl.h"
 #include "caldav-calendar.h"
@@ -21,7 +20,6 @@
 
 struct _CaldavCalendar {
 	Calendar parent;
-	const CalendarConfig* cfg;
 	char* sync_token;
 	RemoteAuth* auth;
 	gboolean op_pending;
@@ -278,16 +276,16 @@ static void do_caldav_put(CaldavCalendar* rc, CURL* curl, struct curl_slist* hea
 	ac->cal = rc;
 	ac->new_event = event;
 
-	const char* root_url = rc->cfg->location;
 	const char* event_url = event_get_url(event);
 	if (event_url == NULL) {
-		char* u = g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->location, ':') + 3, '/'), event_get_uid(event));
+		char* u = g_strdup_printf("%s%s.ics", strchrnul(strchr(calendar_get_location(FOCAL_CALENDAR(rc)), ':') + 3, '/'), event_get_uid(event));
 		event_set_url(event, u);
 		g_free(u);
 		event_url = event_get_url(event);
 	}
 
 	// TODO cleaner?
+	const char* root_url = calendar_get_location(FOCAL_CALENDAR(rc));
 	const char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
 	asprintf(&ac->url, "%.*s%s", (int) (url_path - root_url), root_url, event_get_url(event));
 
@@ -334,7 +332,7 @@ static void save_event(Calendar* c, Event* event)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
-	remote_auth_new_request(rc->auth, do_caldav_put, event);
+	remote_auth_new_request(rc->auth, do_caldav_put, rc, event);
 }
 
 static void do_delete_event(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, Event* event)
@@ -343,14 +341,14 @@ static void do_delete_event(CaldavCalendar* rc, CURL* curl, struct curl_slist* h
 	pc->cal = rc;
 	pc->old_event = event;
 	// TODO is this if stmt really needed?
-	const char* root_url = rc->cfg->location;
 	const char* event_url = event_get_url(event);
 	g_assert(event_url);
 	if (event_url == NULL) {
-		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(rc->cfg->location, ':') + 3, '/'), event_get_uid(event)));
+		event_set_url(event, g_strdup_printf("%s%s.ics", strchrnul(strchr(calendar_get_location(FOCAL_CALENDAR(rc)), ':') + 3, '/'), event_get_uid(event)));
 		event_url = event_get_url(event);
 	}
 
+	const char* root_url = calendar_get_location(FOCAL_CALENDAR(rc));
 	char* url_path = strchrnul(strchr(root_url, ':') + 3, '/');
 	asprintf(&pc->url, "%.*s%s", (int) (url_path - root_url), root_url, event_url);
 
@@ -375,7 +373,7 @@ static void delete_event(Calendar* c, Event* event)
 	if (!event_get_etag(event))
 		return;
 
-	remote_auth_new_request(rc->auth, do_delete_event, event);
+	remote_auth_new_request(rc->auth, do_delete_event, rc, event);
 }
 
 static void each_event(Calendar* c, CalendarEachEventCallback callback, void* user)
@@ -533,7 +531,7 @@ static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist
 	// Here we instead use a calendar-multiget REPORT for efficiency.
 	// See https://tools.ietf.org/html/rfc6578#appendix-B
 
-	curl_easy_setopt(curl, CURLOPT_URL, rc->cfg->location);
+	curl_easy_setopt(curl, CURLOPT_URL, calendar_get_location(FOCAL_CALENDAR(rc)));
 
 	headers = curl_slist_append(headers, "Depth: 1");
 	headers = curl_slist_append(headers, "Prefer: return-minimal");
@@ -591,7 +589,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
 	if (response_code == 401) {
 		g_warning("401 Unauthorized. Assuming auth token has expired and attempting refresh");
-		remote_auth_invalidate_credential(rc->auth, do_caldav_sync, NULL);
+		remote_auth_invalidate_credential(rc->auth, do_caldav_sync, rc, NULL);
 		return;
 	} else if (response_code != 207) {
 		g_critical("unexpected response code %ld", response_code);
@@ -650,7 +648,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		return;
 	}
 
-	remote_auth_new_request(rc->auth, do_multiget_events, hrefs);
+	remote_auth_new_request(rc->auth, do_multiget_events, rc, hrefs);
 }
 
 static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers)
@@ -659,8 +657,7 @@ static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* he
 	// a sync-collection REPORT to retrieve a list of hrefs that have been
 	// updated since the last call to the API (identified by the sync-token)
 	// See https://tools.ietf.org/html/rfc6578#appendix-B
-
-	curl_easy_setopt(curl, CURLOPT_URL, rc->cfg->location);
+	curl_easy_setopt(curl, CURLOPT_URL, calendar_get_location(FOCAL_CALENDAR(rc)));
 
 	// Userdata for the sync operation
 	SyncContext* sc = g_new0(SyncContext, 1);
@@ -694,13 +691,30 @@ static void caldav_sync(Calendar* c)
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(c);
 	ENSURE_EXCLUSIVE(rc);
 
-	remote_auth_new_request(rc->auth, do_caldav_sync, NULL);
+	remote_auth_new_request(rc->auth, do_caldav_sync, rc, NULL);
+}
+
+static void caldav_auth_cancelled(CaldavCalendar* rc)
+{
+	rc->op_pending = FALSE;
+}
+
+static void constructed(GObject* gobject)
+{
+	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(gobject);
+	// url must end with a slash. TODO don't assert
+	g_assert_true(strrchr(calendar_get_location(FOCAL_CALENDAR(rc)), '/')[1] == 0);
+	// auth member must have been supplied by attach_authenticator
+	g_assert_nonnull(rc->auth);
+	rc->events = NULL;
+	rc->sync_token = g_strdup("");
+	g_signal_connect_swapped(rc->auth, "cancelled", G_CALLBACK(caldav_auth_cancelled), rc);
 }
 
 static void finalize(GObject* gobject)
 {
 	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(gobject);
-	remote_auth_free(rc->auth);
+	g_object_unref(rc->auth);
 	free(rc->sync_token);
 	free_events(rc);
 	G_OBJECT_CLASS(caldav_calendar_parent_class)->finalize(gobject);
@@ -710,30 +724,18 @@ void caldav_calendar_init(CaldavCalendar* rc)
 {
 }
 
+static void attach_authenticator(Calendar* c, RemoteAuth* auth)
+{
+	FOCAL_CALDAV_CALENDAR(c)->auth = auth;
+}
+
 void caldav_calendar_class_init(CaldavCalendarClass* klass)
 {
 	FOCAL_CALENDAR_CLASS(klass)->save_event = save_event;
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
+	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
+	G_OBJECT_CLASS(klass)->constructed = constructed;
 	G_OBJECT_CLASS(klass)->finalize = finalize;
-}
-
-static void caldav_auth_cancelled(void* user)
-{
-	CaldavCalendar* rc = FOCAL_CALDAV_CALENDAR(user);
-	rc->op_pending = FALSE;
-}
-
-Calendar* caldav_calendar_new(CalendarConfig* cfg)
-{
-	CaldavCalendar* rc = g_object_new(CALDAV_CALENDAR_TYPE, NULL);
-	// url must end with a slash. TODO don't assert
-	g_assert_true(strrchr(cfg->location, '/')[1] == 0);
-	rc->cfg = cfg;
-	rc->events = NULL;
-	rc->sync_token = g_strdup("");
-	rc->auth = remote_auth_new(cfg, rc);
-	remote_auth_set_declined_callback(rc->auth, caldav_auth_cancelled);
-	return (Calendar*) rc;
 }

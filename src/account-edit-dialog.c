@@ -13,10 +13,7 @@
  */
 #include "account-edit-dialog.h"
 #include "calendar-config.h"
-#include "remote-auth.h"
-
-#include <stdlib.h>
-#include <string.h>
+#include "remote-auth-oauth2.h"
 
 struct _AccountEditDialog {
 	GtkDialog parent;
@@ -46,7 +43,7 @@ static void open_web_login(GtkWidget* button, AccountEditDialog* dialog)
 	// the correct type of authentication
 	dialog_response(dialog, GTK_RESPONSE_OK);
 	gtk_button_set_label(GTK_BUTTON(button), "Waiting for response");
-	remote_auth_new_request(dialog->auth, on_auth_success, NULL);
+	remote_auth_new_request(dialog->auth, on_auth_success, dialog, NULL);
 	// TODO handle closing the window before the response comes (prevent OK, allow cancel)
 }
 
@@ -64,6 +61,7 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("Username"), 0, 4, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->caldav_user, 1, 4, 1, 1);
 		break;
+	case CAL_TYPE_OUTLOOK:
 	case CAL_TYPE_GOOGLE: {
 		GtkWidget* btn = gtk_button_new_with_label("Click to login");
 		g_signal_connect(btn, "clicked", (GCallback) open_web_login, dialog);
@@ -88,6 +86,8 @@ static void populate_fields(AccountEditDialog* dialog)
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user)), dialog->config->login, -1);
 		break;
 	case CAL_TYPE_GOOGLE:
+		break;
+	case CAL_TYPE_OUTLOOK:
 		break;
 	case CAL_TYPE_FILE:
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->location, -1);
@@ -114,6 +114,8 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 		case CAL_TYPE_GOOGLE:
 			free(dialog->config->location);
 			break;
+		case CAL_TYPE_OUTLOOK:
+			break;
 		case CAL_TYPE_FILE:
 			free(dialog->config->location);
 			break;
@@ -129,6 +131,8 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 		case CAL_TYPE_GOOGLE:
 			// TODO: remove duplication with calendar_create, and handle the case where the configured email doesn't match the actual logged in one
 			dialog->config->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", dialog->config->email);
+			break;
+		case CAL_TYPE_OUTLOOK:
 			break;
 		case CAL_TYPE_FILE:
 			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
@@ -184,14 +188,14 @@ GtkWidget* account_edit_dialog_new(GtkWindow* parent_window, CalendarConfig* cfg
 		populate_fields(dialog);
 	}
 
-	dialog->auth = remote_auth_new(dialog->config, dialog);
+	dialog->auth = g_object_new(REMOTE_AUTH_OAUTH2_TYPE, "cfg", dialog->config, NULL);
 
 	return GTK_WIDGET(dialog);
 }
 
 static void finalize(GObject* gobject)
 {
-	remote_auth_free(FOCAL_ACCOUNT_EDIT_DIALOG(gobject)->auth);
+	g_object_unref(FOCAL_ACCOUNT_EDIT_DIALOG(gobject)->auth);
 	G_OBJECT_CLASS(account_edit_dialog_parent_class)->finalize(gobject);
 }
 
