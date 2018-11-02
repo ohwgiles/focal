@@ -1,4 +1,4 @@
-# focal [![status](https://ci.ohwg.net/badge/focal.svg)](https://ci.ohwg.net/jobs/focal)
+# focal [![status](https://ci.ohwg.net/badge/focal.svg)](https://ci.ohwg.net/jobs/focal) [![License: GPL v3](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 ![screenshot](https://user-images.githubusercontent.com/1444499/45927628-c5ab1000-bf3e-11e8-9f70-1685f96b0b08.png)
 
