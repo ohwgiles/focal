@@ -284,6 +284,11 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 
 	} else if (event->type == GDK_2BUTTON_PRESS) {
 		// double-click: request to create an event
+		if (NULL == wv->calendars) {
+			// TODO report error (no calendar configured) via UI. TBD: ask whether to open accounts configuration
+			return FALSE;
+		}
+
 		time_t at = wv->current_view.start + dow * 24 * 3600;
 		icaltimetype dtstart, dtend;
 
@@ -565,9 +570,24 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-int week_view_get_current_week(WeekView* wv)
+struct tm week_view_get_day_start(WeekView* wv)
+{
+	time_t timestamp = wv->current_view.start;
+	struct tm local;
+
+	localtime_r(&timestamp, &local);
+
+	return local;
+}
+
+int week_view_get_week(WeekView* wv)
 {
 	return wv->current_week;
+}
+
+int week_view_get_year(WeekView* wv)
+{
+	return wv->current_year;
 }
 
 static int weeks_in_year(int year)
