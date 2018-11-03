@@ -580,7 +580,7 @@ int week_view_get_week(WeekView *wv)
 	return wv->current_week;
 }
 
-int week_view_get_current_year(WeekView* wv)
+int week_view_get_year(WeekView *wv)
 {
 	return wv->current_year;
 }

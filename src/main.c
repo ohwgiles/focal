@@ -165,7 +165,7 @@ static void update_window_title(FocalApp* fm)
     char month_at_week_end[16];
     strftime(month_at_week_end, sizeof(month_at_week_end), "%B", &day);
 
-    int year = week_view_get_current_year(wv);
+    int year = week_view_get_year(wv);
 
 	char week_title[48];
     if (strcmp(month_at_week_start, month_at_week_end) == 0) {

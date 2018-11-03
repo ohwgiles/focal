@@ -30,7 +30,7 @@ void week_view_add_calendar(WeekView* widget, Calendar* cal);
 void week_view_remove_calendar(WeekView* wv, Calendar* cal);
 struct tm week_view_get_day_start(WeekView *wv);
 int week_view_get_week(WeekView *wv);
-int week_view_get_current_year(WeekView* wv);
+int week_view_get_year(WeekView *wv);
 void week_view_previous(WeekView* wv);
 void week_view_next(WeekView* wv);
 void week_view_refresh(WeekView* wv, Event* ev);
