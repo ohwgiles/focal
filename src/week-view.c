@@ -570,26 +570,6 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-struct tm week_view_get_day_start(WeekView* wv)
-{
-	time_t timestamp = wv->current_view.start;
-	struct tm local;
-
-	localtime_r(&timestamp, &local);
-
-	return local;
-}
-
-int week_view_get_week(WeekView* wv)
-{
-	return wv->current_week;
-}
-
-int week_view_get_year(WeekView* wv)
-{
-	return wv->current_year;
-}
-
 static int weeks_in_year(int year)
 {
 	int jan1_dow = icaltime_day_of_week(icaltime_from_day_of_year(1, year));
