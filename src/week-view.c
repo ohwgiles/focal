@@ -565,9 +565,24 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-int week_view_get_current_week(WeekView* wv)
+struct tm week_view_get_day_start(WeekView *wv)
+{
+	time_t timestamp = wv->current_view.start;
+	struct tm local;
+
+	localtime_r(&timestamp, &local);
+
+	return local;
+}
+
+int week_view_get_week(WeekView *wv)
 {
 	return wv->current_week;
+}
+
+int week_view_get_current_year(WeekView* wv)
+{
+	return wv->current_year;
 }
 
 static int weeks_in_year(int year)
@@ -575,8 +590,7 @@ static int weeks_in_year(int year)
 	int jan1_dow = icaltime_day_of_week(icaltime_from_day_of_year(1, year));
 	if (jan1_dow == ICAL_THURSDAY_WEEKDAY || (jan1_dow == ICAL_WEDNESDAY_WEEKDAY && icaltime_is_leap_year(year)))
 		return 53;
-	else
-		return 52;
+    return 52;
 }
 
 static void week_view_populate_view(WeekView* wv)

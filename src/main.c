@@ -152,9 +152,27 @@ static void create_calendars(FocalApp* fm)
 
 static void update_window_title(FocalApp* fm)
 {
-	int week_num = week_view_get_current_week(FOCAL_WEEK_VIEW(fm->weekView));
-	char week_title[8];
-	snprintf(week_title, 8, "Week %d", week_num);
+    WeekView *wv = FOCAL_WEEK_VIEW(fm->weekView);
+
+    int week_num = week_view_get_week(wv);
+
+    struct tm day = week_view_get_day_start(wv);
+    char month_at_week_start[16];
+    strftime(month_at_week_start, sizeof(month_at_week_start), "%B", &day);
+
+    day.tm_mday += 7;
+    mktime(&day);
+    char month_at_week_end[16];
+    strftime(month_at_week_end, sizeof(month_at_week_end), "%B", &day);
+
+    int year = week_view_get_current_year(wv);
+
+	char week_title[48];
+    if (strcmp(month_at_week_start, month_at_week_end) == 0) {
+        snprintf(week_title, 48, "Week %d - %s %d", week_num, month_at_week_start, year);
+    } else {
+        snprintf(week_title, 48, "Week %d - %s/%s %d", week_num, month_at_week_start, month_at_week_end, year);
+    }
 
 	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), week_title);
 }
