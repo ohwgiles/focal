@@ -33,6 +33,7 @@ typedef struct {
 struct _FocalApp {
 	GtkApplication parent;
 	GtkWidget* mainWindow;
+	GtkWidget* header;
 	char* path_prefs;
 	FocalPrefs prefs;
 	char* path_accounts;
@@ -150,31 +151,39 @@ static void create_calendars(FocalApp* fm)
 	}
 }
 
+static void update_header_subtitle(FocalApp* fm)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(fm->weekView);
+
+	struct tm day_start = week_view_get_start(wv);
+	char start[24];
+	strftime(start, sizeof(start), "%e. %B %G", &day_start);
+
+	struct tm day_end = week_view_get_end(wv);
+	char end[24];
+	day_end.tm_hour -= 2;
+	mktime(&day_end);
+
+	strftime(end, sizeof(end), "%e. %B %G", &day_end);
+
+	char title[52];
+	snprintf(title, 96, "%s – %s", start, end);
+
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(fm->header), title);
+}
+
 static void update_window_title(FocalApp* fm)
 {
-    WeekView *wv = FOCAL_WEEK_VIEW(fm->weekView);
+	WeekView* wv = FOCAL_WEEK_VIEW(fm->weekView);
 
-    int week_num = week_view_get_week(wv);
+	int week_num = week_view_get_week(wv);
 
-    struct tm day = week_view_get_day_start(wv);
-    char month_at_week_start[16];
-    strftime(month_at_week_start, sizeof(month_at_week_start), "%B", &day);
+	char title[8];
+	snprintf(title, 8, "Week %d", week_num);
 
-    day.tm_mday += 7;
-    mktime(&day);
-    char month_at_week_end[16];
-    strftime(month_at_week_end, sizeof(month_at_week_end), "%B", &day);
+	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), title);
 
-    int year = week_view_get_year(wv);
-
-	char week_title[48];
-    if (strcmp(month_at_week_start, month_at_week_end) == 0) {
-        snprintf(week_title, 48, "Week %d - %s %d", week_num, month_at_week_start, year);
-    } else {
-        snprintf(week_title, 48, "Week %d - %s/%s %d", week_num, month_at_week_start, month_at_week_end, year);
-    }
-
-	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), week_title);
+	update_header_subtitle(fm);
 }
 
 static void on_calendar_menu(GtkButton* button, FocalApp* fm)
@@ -271,6 +280,7 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 		g_key_file_free(kf);
 		// update view
 		week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
+		update_window_title(fm);
 	}
 	gtk_widget_destroy(dialog);
 }
@@ -302,8 +312,8 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	g_signal_connect_swapped(fm->weekView, "date-range-changed", (GCallback) &update_window_title, fm);
 	g_signal_connect(fm->eventDetail, "event-modified", (GCallback) &on_event_modified, fm);
 
-	GtkWidget* header = gtk_header_bar_new();
-	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header), TRUE);
+	fm->header = gtk_header_bar_new();
+	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(fm->header), TRUE);
 	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
 	GtkWidget *prev = gtk_button_new(), *next = gtk_button_new();
@@ -317,15 +327,15 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	GtkWidget* menu = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
 	g_signal_connect(menu, "clicked", (GCallback) &on_calendar_menu, fm);
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), menu);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(fm->header), menu);
 
 	GtkWidget* syncbutton = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(syncbutton), gtk_image_new_from_icon_name("emblem-synchronizing-symbolic", GTK_ICON_SIZE_MENU));
 	g_signal_connect(syncbutton, "clicked", (GCallback) &on_sync_clicked, fm);
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(header), syncbutton);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(fm->header), syncbutton);
 
-	gtk_header_bar_pack_start(GTK_HEADER_BAR(header), nav);
-	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), header);
+	gtk_header_bar_pack_start(GTK_HEADER_BAR(fm->header), nav);
+	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), fm->header);
 
 	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
 	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
