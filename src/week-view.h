@@ -31,7 +31,6 @@ void week_view_remove_calendar(WeekView* wv, Calendar* cal);
 struct tm week_view_get_start(WeekView* wv);
 struct tm week_view_get_end(WeekView* wv);
 int week_view_get_week(WeekView* wv);
-int week_view_get_year(WeekView* wv);
 void week_view_previous(WeekView* wv);
 void week_view_next(WeekView* wv);
 void week_view_refresh(WeekView* wv, Event* ev);

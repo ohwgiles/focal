@@ -593,17 +593,13 @@ int week_view_get_week(WeekView* wv)
 	return wv->current_week;
 }
 
-int week_view_get_year(WeekView* wv)
-{
-	return wv->current_year;
-}
-
 static int weeks_in_year(int year)
 {
 	int jan1_dow = icaltime_day_of_week(icaltime_from_day_of_year(1, year));
 	if (jan1_dow == ICAL_THURSDAY_WEEKDAY || (jan1_dow == ICAL_WEDNESDAY_WEEKDAY && icaltime_is_leap_year(year)))
 		return 53;
-	return 52;
+	else
+		return 52;
 }
 
 static void week_view_populate_view(WeekView* wv)
