@@ -280,7 +280,8 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 		g_key_file_free(kf);
 		// update view
 		week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
-		update_window_title(fm);
+
+		g_signal_emit_by_name(fm->weekView, "date-range-changed");
 	}
 	gtk_widget_destroy(dialog);
 }
