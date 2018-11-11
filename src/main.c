@@ -151,27 +151,6 @@ static void create_calendars(FocalApp* fm)
 	}
 }
 
-static void update_header_subtitle(FocalApp* fm)
-{
-	WeekView* wv = FOCAL_WEEK_VIEW(fm->weekView);
-
-	struct tm day_start = week_view_get_start(wv);
-	char start[24];
-	strftime(start, sizeof(start), "%e. %B %G", &day_start);
-
-	struct tm day_end = week_view_get_end(wv);
-	char end[24];
-	day_end.tm_hour -= 2;
-	mktime(&day_end);
-
-	strftime(end, sizeof(end), "%e. %B %G", &day_end);
-
-	char title[52];
-	snprintf(title, 96, "%s – %s", start, end);
-
-	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(fm->header), title);
-}
-
 static void update_window_title(FocalApp* fm)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(fm->weekView);
@@ -183,7 +162,21 @@ static void update_window_title(FocalApp* fm)
 
 	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), title);
 
-	update_header_subtitle(fm);
+	// update header subtitle
+	icaltime_span current_view = week_view_get_current_view(wv);
+
+	char start[40];
+	strftime(start, sizeof(start), "%e. %B %G", localtime(&current_view.start));
+
+	// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
+	time_t day_end = current_view.end - 360;
+	char end[40];
+	strftime(end, sizeof(end), "%e. %B %G", localtime(&day_end));
+
+	char subtitle[80];
+	snprintf(subtitle, 80, "%s – %s", start, end);
+
+	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(fm->header), subtitle);
 }
 
 static void on_calendar_menu(GtkButton* button, FocalApp* fm)
@@ -280,8 +273,6 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 		g_key_file_free(kf);
 		// update view
 		week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
-
-		g_signal_emit_by_name(fm->weekView, "date-range-changed");
 	}
 	gtk_widget_destroy(dialog);
 }
