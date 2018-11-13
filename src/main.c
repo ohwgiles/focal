@@ -158,23 +158,23 @@ static void update_window_title(FocalApp* fm)
 	int week_num = week_view_get_week(wv);
 
 	char title[8];
-	snprintf(title, 8, "Week %d", week_num);
+	snprintf(title, sizeof(title), "Week %d", week_num);
 
 	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), title);
 
 	// update header subtitle
 	icaltime_span current_view = week_view_get_current_view(wv);
 
-	char start[40];
+	char start[28];
 	strftime(start, sizeof(start), "%e. %B %G", localtime(&current_view.start));
 
-	// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
-	time_t day_end = current_view.end - 360;
-	char end[40];
+	// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
+	time_t day_end = current_view.end - 3600;
+	char end[28];
 	strftime(end, sizeof(end), "%e. %B %G", localtime(&day_end));
 
-	char subtitle[80];
-	snprintf(subtitle, 80, "%s – %s", start, end);
+	char subtitle[64];
+	snprintf(subtitle, sizeof(subtitle), "%s – %s", start, end);
 
 	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(fm->header), subtitle);
 }
