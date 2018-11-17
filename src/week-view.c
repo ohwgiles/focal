@@ -570,9 +570,14 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
-int week_view_get_current_week(WeekView* wv)
+int week_view_get_week(WeekView* wv)
 {
 	return wv->current_week;
+}
+
+icaltime_span week_view_get_current_view(WeekView* wv)
+{
+	return wv->current_view;
 }
 
 static int weeks_in_year(int year)
@@ -664,5 +669,5 @@ void week_view_set_day_span(WeekView* wv, int day_start, int day_end)
 	wv->day_start = day_start;
 	wv->day_end = day_end;
 	update_view_span(wv);
-	gtk_widget_queue_draw((GtkWidget*) wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
