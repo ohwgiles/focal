@@ -36,8 +36,12 @@ struct _WeekView {
 	GSList* calendars;
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
+	int todays_week;
+	int todays_year;
+	// TODO TBD: rename to "shown_week" and "shown_year" to prevent confusing the displayed with current week and year?
 	int current_week; // 1-based, note libical is 0-based
 	int current_year;
+	// TODO TBD: rename to "weekday_start" and "weekday_end" to prevent confusing int with UNIX timestamp?
 	int day_start;
 	int day_end;
 	icaltimezone* current_tz;
@@ -480,7 +484,7 @@ void update_view_span(WeekView* wv)
 	wv->current_view = icaltime_span_new(start, until, 0);
 }
 
-GtkWidget* week_view_new()
+GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year)
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
@@ -488,9 +492,12 @@ GtkWidget* week_view_new()
 	cw->current_tz = icaltimezone_get_builtin_timezone(zoneinfo_link + strlen("/usr/share/zoneinfo/"));
 	free(zoneinfo_link);
 
-	icaltimetype today = icaltime_today();
-	cw->current_week = icaltime_week_number(today) + 1;
-	cw->current_year = today.year;
+	cw->todays_week = todays_week;
+	cw->todays_year = todays_year;
+
+	// initially show current week of current year
+	cw->current_week = todays_week;
+	cw->current_year = todays_year;
 	update_view_span(cw);
 
 	update_current_time(cw);
@@ -614,6 +621,15 @@ void week_view_previous(WeekView* wv)
 {
 	if (--wv->current_week == 0)
 		wv->current_week = weeks_in_year(--wv->current_year) - 1;
+	week_view_populate_view(wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+}
+
+void week_view_current(WeekView* wv)
+{
+	wv->current_week = wv->todays_week;
+	if (wv->current_year != wv->todays_year)
+		wv->current_year = wv->todays_year;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
