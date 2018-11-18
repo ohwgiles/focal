@@ -483,7 +483,7 @@ void update_view_span(WeekView* wv)
 	wv->current_view = icaltime_span_new(start, until, 0);
 }
 
-GtkWidget* week_view_new()
+GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year)
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
@@ -618,6 +618,15 @@ void week_view_goto_previous(WeekView* wv)
 {
 	if (--wv->shown_week == 0)
 		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
+	week_view_populate_view(wv);
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+}
+
+void week_view_current(WeekView* wv)
+{
+	wv->current_week = wv->todays_week;
+	if (wv->current_year != wv->todays_year)
+		wv->current_year = wv->todays_year;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
