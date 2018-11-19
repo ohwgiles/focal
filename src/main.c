@@ -38,9 +38,6 @@ struct _FocalApp {
 	FocalPrefs prefs;
 	char* path_accounts;
 	GSList* accounts;
-	icaltimetype today;
-	int todays_week;
-	int todays_year;
 	GSList* calendars;
 	GtkWidget* weekView;
 	GtkWidget* popover;
@@ -283,7 +280,7 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
-	fm->weekView = week_view_new(fm->today, fm->todays_week, fm->todays_year);
+	fm->weekView = week_view_new();
 	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
 	fm->eventDetail = event_panel_new();
 
@@ -311,20 +308,16 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(fm->header), TRUE);
 	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
-
 	GtkWidget *prev = gtk_button_new(), *next = gtk_button_new();
-	char current_week_label[16];
-	sprintf(current_week_label, "Week %d", fm->todays_week);
-	GtkWidget* current = gtk_button_new_with_label(current_week_label);
-
+	GtkWidget* current = gtk_button_new_with_label("▼");
 	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_container_add(GTK_CONTAINER(nav), prev);
 	gtk_container_add(GTK_CONTAINER(nav), current);
 	gtk_container_add(GTK_CONTAINER(nav), next);
-	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_previous, fm->weekView);
-	g_signal_connect_swapped(current, "clicked", (GCallback) &week_view_current, fm->weekView);
-	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_next, fm->weekView);
+	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_go_previous, fm->weekView);
+	g_signal_connect_swapped(current, "clicked", (GCallback) &week_view_go_current, fm->weekView);
+	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_go_next, fm->weekView);
 
 	GtkWidget* menu = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
@@ -387,10 +380,6 @@ static void focal_startup(GApplication* app)
 
 	fm->accounts = calendar_config_load_from_file(fm->path_accounts);
 	load_preferences(fm->path_prefs, &fm->prefs);
-
-	fm->today = icaltime_today();
-	fm->todays_week = icaltime_week_number(fm->today) + 1;
-	fm->todays_year = fm->today.year;
 
 	g_application_activate(app);
 }
