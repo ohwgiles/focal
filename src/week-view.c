@@ -36,20 +36,18 @@ struct _WeekView {
 	GSList* calendars;
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
-	int todays_week;
-	int todays_year;
-	// TODO TBD: rename to "shown_week" and "shown_year" to prevent confusing the displayed with current week and year?
-	int current_week; // 1-based, note libical is 0-based
-	int current_year;
-	// TODO TBD: rename to "weekday_start" and "weekday_end" to prevent confusing int with UNIX timestamp?
-	int day_start;
-	int day_end;
+	int shown_week; // 1-based, note libical is 0-based
+	int shown_year;
+	int weekday_start;
+	int weekday_end;
 	icaltimezone* current_tz;
 	icaltime_span current_view;
 	struct {
 		gboolean visible;
-		int dow;
+		int weekday;
 		int minutes;
+		int week;
+		int year;
 	} now;
 };
 
@@ -112,7 +110,7 @@ static void draw_event(cairo_t* cr, Event* tmp, PangoLayout* layout, double x, d
 
 static void week_view_draw(WeekView* wv, cairo_t* cr)
 {
-	const int num_days = wv->day_end - wv->day_start + 1;
+	const int num_days = wv->weekday_end - wv->weekday_start + 1;
 	const double dashes[] = {1.0};
 
 	double dark = 0.3, med = 0.65, light = 0.85;
@@ -162,7 +160,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	// draw events
 	for (int d = 0; d < num_days; ++d) {
-		for (EventWidget* tmp = wv->events_week[d + wv->day_start]; tmp; tmp = tmp->next) {
+		for (EventWidget* tmp = wv->events_week[d + wv->weekday_start]; tmp; tmp = tmp->next) {
 			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
 			draw_event(cr, tmp->ev, layout,
 					   wv->x + SIDEBAR_WIDTH + d * day_width,
@@ -176,7 +174,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		double nowY = wv->y + day_begin_yoffset + wv->now.minutes * HALFHOUR_HEIGHT / 30 - (int) wv->scroll_pos;
 		cairo_set_source_rgb(cr, 1, 0, 0);
 		cairo_set_dash(cr, NULL, 0, 0);
-		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + (wv->now.dow - wv->day_start) * day_width, nowY);
+		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + (wv->now.weekday - wv->weekday_start) * day_width, nowY);
 		cairo_rel_line_to(cr, day_width, 0);
 		cairo_stroke(cr);
 	}
@@ -253,7 +251,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 		return TRUE;
 
 	// look for collisions
-	const int num_days = (wv->day_end - wv->day_start + 1);
+	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
 	const int dow = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 	const gboolean all_day = event->y < day_begin_yoffset;
@@ -446,13 +444,24 @@ static void week_view_init(WeekView* wv)
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
 
+static int week_number(struct tm ld)
+{
+	int DAYS_PER_WEEK = 7;
+
+	const int wday = ld.tm_wday;
+	const int delta = wday ? wday - 1 : DAYS_PER_WEEK - 1;
+	return (ld.tm_yday + DAYS_PER_WEEK - delta) / DAYS_PER_WEEK;
+}
+
 static void update_current_time(WeekView* wv)
 {
 	struct tm ld;
 	time_t now = time(NULL);
 	localtime_r(&now, &ld);
 	wv->now.minutes = ld.tm_hour * 60 + ld.tm_min;
-	wv->now.dow = ld.tm_wday;
+	wv->now.weekday = ld.tm_wday;
+	wv->now.week = week_number(ld);
+	wv->now.year = ld.tm_year;
 }
 
 static gboolean timer_update_current_time(gpointer user_data)
@@ -466,25 +475,25 @@ static gboolean timer_update_current_time(gpointer user_data)
 void update_view_span(WeekView* wv)
 {
 	// based on algorithm from https://en.wikipedia.org/wiki/ISO_week_date
-	int wd_4jan = icaltime_day_of_week(icaltime_from_day_of_year(4, wv->current_year));
-	int tmp = wv->current_week * 7 + wv->day_start - (wd_4jan + 2); // First day of week
+	int wd_4jan = icaltime_day_of_week(icaltime_from_day_of_year(4, wv->shown_year));
+	int tmp = wv->shown_week * 7 + wv->weekday_start - (wd_4jan + 2); // First day of week
 	if (tmp < 1) {
-		tmp += icaltime_days_in_year(--wv->current_year);
-	} else if (tmp > icaltime_days_in_year(wv->current_year)) {
-		tmp -= icaltime_days_in_year(wv->current_year++);
+		tmp += icaltime_days_in_year(--wv->shown_year);
+	} else if (tmp > icaltime_days_in_year(wv->shown_year)) {
+		tmp -= icaltime_days_in_year(wv->shown_year++);
 	}
-	icaltimetype start = icaltime_from_day_of_year(tmp, wv->current_year);
+	icaltimetype start = icaltime_from_day_of_year(tmp, wv->shown_year);
 	start.hour = 0;
 	start.minute = 0;
 	start.second = 0;
 	start.is_date = FALSE;
 	start.zone = wv->current_tz;
 	icaltimetype until = start;
-	icaltime_adjust(&until, wv->day_end - wv->day_start + 1, 0, 0, 0);
+	icaltime_adjust(&until, wv->weekday_end - wv->weekday_start + 1, 0, 0, 0);
 	wv->current_view = icaltime_span_new(start, until, 0);
 }
 
-GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year)
+GtkWidget* week_view_new()
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
@@ -492,12 +501,11 @@ GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year)
 	cw->current_tz = icaltimezone_get_builtin_timezone(zoneinfo_link + strlen("/usr/share/zoneinfo/"));
 	free(zoneinfo_link);
 
-	cw->todays_week = todays_week;
-	cw->todays_year = todays_year;
+	icaltimetype today = icaltime_today();
 
 	// initially show current week of current year
-	cw->current_week = todays_week;
-	cw->current_year = todays_year;
+	cw->shown_week = icaltime_week_number(today) + 1;
+	cw->shown_year = today.year;
 	update_view_span(cw);
 
 	update_current_time(cw);
@@ -518,7 +526,7 @@ static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurati
 
 	// crude faster filter
 	// TODO what if the week overlaps a year boundary?
-	if (next.year < wv->current_year || next.year > wv->current_year)
+	if (next.year < wv->shown_year || next.year > wv->shown_year)
 		return;
 
 	// exact check
@@ -579,7 +587,7 @@ void week_view_add_calendar(WeekView* wv, Calendar* cal)
 
 int week_view_get_week(WeekView* wv)
 {
-	return wv->current_week;
+	return wv->shown_week;
 }
 
 icaltime_span week_view_get_current_view(WeekView* wv)
@@ -617,28 +625,28 @@ void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 	week_view_populate_view(wv);
 }
 
-void week_view_previous(WeekView* wv)
+void week_view_go_previous(WeekView* wv)
 {
-	if (--wv->current_week == 0)
-		wv->current_week = weeks_in_year(--wv->current_year) - 1;
+	if (--wv->shown_week == 0)
+		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
-void week_view_current(WeekView* wv)
+void week_view_go_current(WeekView* wv)
 {
-	wv->current_week = wv->todays_week;
-	if (wv->current_year != wv->todays_year)
-		wv->current_year = wv->todays_year;
+	wv->shown_week = wv->now.week;
+	if (wv->shown_year != wv->now.year)
+		wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
-void week_view_next(WeekView* wv)
+void week_view_go_next(WeekView* wv)
 {
-	wv->current_week = wv->current_week % weeks_in_year(wv->current_year) + 1;
-	if (wv->current_week == 1)
-		wv->current_year++;
+	wv->shown_week = wv->shown_week % weeks_in_year(wv->shown_year) + 1;
+	if (wv->shown_week == 1)
+		wv->shown_year++;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
@@ -667,23 +675,23 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	// The event might not be in the current view
 	icaltimetype dt = event_get_dtstart(event);
 	icaltimetype et = event_get_dtend(event);
-	wv->current_week = icaltime_week_number(dt) + 1;
-	wv->current_year = dt.year;
+	wv->shown_week = icaltime_week_number(dt) + 1;
+	wv->shown_year = dt.year;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 
 	GdkRectangle rect;
-	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->day_end - wv->day_start + 1);
+	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->weekday_end - wv->weekday_start + 1);
 	rect.x = (icaltime_day_of_week(dt) - 1) * rect.width + SIDEBAR_WIDTH;
 	rect.y = HEADER_HEIGHT + (dt.hour * 60 + dt.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
 }
 
-void week_view_set_day_span(WeekView* wv, int day_start, int day_end)
+void week_view_set_day_span(WeekView* wv, int weekday_start, int weekday_end)
 {
-	wv->day_start = day_start;
-	wv->day_end = day_end;
+	wv->weekday_start = weekday_start;
+	wv->weekday_end = weekday_end;
 	update_view_span(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }

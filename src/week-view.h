@@ -21,7 +21,7 @@
 #define FOCAL_TYPE_WEEK_VIEW (week_view_get_type())
 G_DECLARE_FINAL_TYPE(WeekView, week_view, FOCAL, WEEK_VIEW, GtkDrawingArea)
 
-GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year);
+GtkWidget* week_view_new();
 
 void week_view_add_event(WeekView* wv, Event* vevent);
 void week_view_remove_event(WeekView* wv, Event* vevent);
@@ -30,10 +30,10 @@ void week_view_add_calendar(WeekView* widget, Calendar* cal);
 void week_view_remove_calendar(WeekView* wv, Calendar* cal);
 int week_view_get_week(WeekView* wv);
 icaltime_span week_view_get_current_view(WeekView* wv);
-void week_view_previous(WeekView* wv);
-void week_view_current(WeekView* wv);
-void week_view_next(WeekView* wv);
+void week_view_go_previous(WeekView* wv);
+void week_view_go_current(WeekView* wv);
+void week_view_go_next(WeekView* wv);
 void week_view_refresh(WeekView* wv, Event* ev);
-void week_view_set_day_span(WeekView* wv, int day_start, int day_end);
+void week_view_set_day_span(WeekView* wv, int weekday_start, int weekday_end);
 
 #endif // WEEK_VIEW_H
