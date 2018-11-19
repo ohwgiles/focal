@@ -461,7 +461,7 @@ static void update_current_time(WeekView* wv)
 	wv->now.minutes = ld.tm_hour * 60 + ld.tm_min;
 	wv->now.weekday = ld.tm_wday;
 	wv->now.week = week_number(ld);
-	wv->now.year = ld.tm_year;
+	wv->now.year = ld.tm_year + 1900;
 }
 
 static gboolean timer_update_current_time(gpointer user_data)
