@@ -21,7 +21,7 @@
 #define FOCAL_TYPE_WEEK_VIEW (week_view_get_type())
 G_DECLARE_FINAL_TYPE(WeekView, week_view, FOCAL, WEEK_VIEW, GtkDrawingArea)
 
-GtkWidget* week_view_new(icaltimetype today, int todays_week, int todays_year);
+GtkWidget* week_view_new();
 
 void week_view_add_event(WeekView* wv, Event* vevent);
 void week_view_remove_event(WeekView* wv, Event* vevent);
