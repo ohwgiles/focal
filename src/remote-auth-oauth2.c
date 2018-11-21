@@ -53,7 +53,7 @@ static void on_external_browser_response(void* user_data, const gchar* cookie, c
 
 	// Every instance of RemoteAuth receives this callback. Check that this event was really
 	// intended for us by comparing the cookie attached to the event
-	if (cfg->cookie && strcmp(cfg->cookie, cookie) == 0) {
+	if (cfg->cookie && g_strcmp0(cfg->cookie, cookie) == 0) {
 		CURL* curl = curl_easy_init();
 		g_assert_nonnull(curl);
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1);
@@ -80,7 +80,7 @@ static void launch_external_authentication(RemoteAuthOAuth2* oa)
 
 	fprintf(stderr, "Launching browser for %s", url);
 	gboolean ret = g_app_info_launch_default_for_uri(url, NULL, &error);
-	free(url);
+	g_free(url);
 	if (!ret)
 		g_error("Could not launch web browser: %s", error->message);
 }
@@ -196,7 +196,7 @@ static void on_refresh_token_lookup(GObject* source, GAsyncResult* result, gpoin
 	if (error != NULL) {
 		g_critical(error->message);
 		g_error_free(error);
-		free(oa->ctx);
+		g_free(oa->ctx);
 		oa->ctx = NULL;
 	} else if (token == NULL) {
 		// no refresh token in password store, we need to run authentication again!
@@ -242,7 +242,7 @@ static void on_auth_token_lookup(GObject* source, GAsyncResult* result, gpointer
 		(*ba->ctx->callback)(ba->ctx->user, curl, hdrs, ba->ctx->arg);
 		secret_password_free(token);
 	}
-	free(ba->ctx);
+	g_free(ba->ctx);
 	ba->ctx = NULL;
 }
 
@@ -252,7 +252,7 @@ static void remote_auth_oauth2_new_request(RemoteAuth* ra, void (*callback)(), v
 	CalendarConfig* cfg = oa->cfg;
 	if (cfg->cookie == NULL) {
 		g_warning("cookie is unset, generating new");
-		cfg->cookie = g_uuid_string_random();
+		cfg->cookie = g_strdup_printf("%.8x%.8x%.8x", g_random_int(), g_random_int(), g_random_int());
 	}
 
 	g_assert_nonnull(oa->provider);

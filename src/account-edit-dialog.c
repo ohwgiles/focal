@@ -104,29 +104,29 @@ static void account_type_changed(AccountEditDialog* dialog, GtkComboBox* account
 static void dialog_response(AccountEditDialog* dialog, gint response_id)
 {
 	if (response_id == GTK_RESPONSE_OK) {
-		free(dialog->config->label);
-		free(dialog->config->email);
+		g_free(dialog->config->label);
+		g_free(dialog->config->email);
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			free(dialog->config->location);
-			free(dialog->config->login);
+			g_free(dialog->config->location);
+			g_free(dialog->config->login);
 			break;
 		case CAL_TYPE_GOOGLE:
-			free(dialog->config->location);
+			g_free(dialog->config->location);
 			break;
 		case CAL_TYPE_OUTLOOK:
 			break;
 		case CAL_TYPE_ICS_URL:
-			free(dialog->config->location);
+			g_free(dialog->config->location);
 			break;
 		}
 		dialog->config->type = (CalendarAccountType) gtk_combo_box_get_active(GTK_COMBO_BOX(dialog->combo_type));
-		dialog->config->label = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
-		dialog->config->email = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email))));
+		dialog->config->label = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
+		dialog->config->email = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email))));
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
-			dialog->config->login = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
+			dialog->config->location = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
+			dialog->config->login = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
 			break;
 		case CAL_TYPE_GOOGLE:
 			// TODO: remove duplication with calendar_create, and handle the case where the configured email doesn't match the actual logged in one
@@ -135,7 +135,7 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 		case CAL_TYPE_OUTLOOK:
 			break;
 		case CAL_TYPE_ICS_URL:
-			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
+			dialog->config->location = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
 			break;
 		}
 	}

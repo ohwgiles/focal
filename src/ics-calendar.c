@@ -12,6 +12,7 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include <libical/ical.h>
+#include <string.h>
 
 #include "ics-calendar.h"
 
@@ -35,7 +36,7 @@ static void write_ical_to_disk(IcsCalendar* ic)
 	GError* err = NULL;
 	// TODO: asynchronously
 	g_file_replace_contents(ic->file, ics, strlen(ics), NULL, TRUE, G_FILE_CREATE_NONE, NULL, NULL, &err);
-	free(ics);
+	g_free(ics);
 
 	for (icalcomponent* e = icalcomponent_get_first_component(ic->ical, ICAL_VEVENT_COMPONENT); (e = icalcomponent_get_current_component(ic->ical));) {
 		if (icalcomponent_isa(e) == ICAL_VEVENT_COMPONENT) {

@@ -16,12 +16,12 @@
 
 void calendar_config_free(CalendarConfig* cfg)
 {
-	free(cfg->label);
-	free(cfg->location);
-	free(cfg->email);
-	free(cfg->cookie);
-	free(cfg->login);
-	free(cfg);
+	g_free(cfg->label);
+	g_free(cfg->location);
+	g_free(cfg->email);
+	g_free(cfg->cookie);
+	g_free(cfg->login);
+	g_free(cfg);
 }
 
 const char* calendar_type_as_string(CalendarAccountType type)
@@ -71,7 +71,7 @@ GSList* calendar_config_load_from_file(const char* config_file)
 		}
 		g_free(type);
 
-		cfg->label = strdup(groups[i]);
+		cfg->label = g_strdup(groups[i]);
 		cfg->email = g_key_file_get_string(keyfile, groups[i], "email", NULL);
 		calendar_configs = g_slist_append(calendar_configs, cfg);
 	}
@@ -112,7 +112,7 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 
 	if (!g_key_file_save_to_file(keyfile, config_file, &error)) {
 		fprintf(stderr, "Error saving key file: %s", error->message);
-		free(error);
+		g_error_free(error);
 	}
 	g_key_file_free(keyfile);
 }

@@ -88,7 +88,7 @@ static void on_password_stored(GObject* source, GAsyncResult* result, gpointer u
 		g_warning(error->message);
 		g_error_free(error);
 		// cancel current operation
-		free(ba->ctx);
+		g_free(ba->ctx);
 		ba->ctx = NULL;
 	} else {
 		// immediately look up the password again so we can continue the originally
@@ -140,7 +140,7 @@ static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer u
 		(*dfc->callback)(dfc->user, curl, hdrs, dfc->arg);
 		secret_password_free(password);
 	}
-	free(dfc);
+	g_free(dfc);
 	ba->ctx = NULL;
 }
 

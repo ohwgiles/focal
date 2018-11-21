@@ -18,6 +18,8 @@
 #include <curl/curl.h>
 #include <json-glib/json-glib.h>
 #include <libsecret/secret.h>
+#include <stdlib.h>
+#include <string.h>
 
 struct _OutlookCalendar {
 	Calendar parent;
@@ -50,7 +52,7 @@ typedef struct {
 static void on_delete_complete(CURL* curl, CURLcode ret, void* user)
 {
 	ModifyContext* ac = (ModifyContext*) user;
-	free(ac->url);
+	g_free(ac->url);
 	printf("in on_delete_complete\n");
 	if (ret == CURLE_OK) {
 		long response_code;
@@ -62,7 +64,7 @@ static void on_delete_complete(CURL* curl, CURLcode ret, void* user)
 			g_signal_emit_by_name(ac->oc, "sync-done", 0);
 		}
 	}
-	free(ac);
+	g_free(ac);
 }
 
 static void do_delete_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event)
@@ -184,8 +186,8 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 {
 	ModifyContext* ac = (ModifyContext*) user;
 	printf("in on_create_event_complete\n");
-	free(ac->url);
-	free(ac->payload);
+	g_free(ac->url);
+	g_free(ac->payload);
 	if (ret == CURLE_OK) {
 		long response_code;
 		curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
@@ -207,7 +209,7 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 		}
 	}
 	g_string_free(ac->put_response, TRUE);
-	free(ac);
+	g_free(ac);
 }
 
 static void do_outlook_add_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event)
@@ -340,7 +342,7 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	if (response_code == 401) {
 		g_warning("401 Unauthorized. Assuming auth token has expired and attempting refresh");
 		g_string_free(sc->sync_resp, TRUE);
-		free(sc);
+		g_free(sc);
 		remote_auth_invalidate_credential(oc->ba, do_outlook_sync, oc, NULL);
 		return;
 	} else if (response_code != 200) {
@@ -376,7 +378,7 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	g_object_unref(parser);
 
 	g_string_free(sc->sync_resp, TRUE);
-	free(sc);
+	g_free(sc);
 
 	g_signal_emit_by_name(oc, "sync-done", 0);
 }
@@ -445,7 +447,7 @@ Calendar* outlook_calendar_new(CalendarConfig* cfg)
 	oc->cfg = cfg;
 	oc->events = NULL;
 	// TODO: error handling
-	oc->tz = strdup(realpath("/etc/localtime", NULL) + strlen("/usr/share/zoneinfo/"));
+	oc->tz = g_strdup(realpath("/etc/localtime", NULL) + strlen("/usr/share/zoneinfo/"));
 	oc->prefer_tz = g_strdup_printf("Prefer: outlook.timezone=\"%s\"", oc->tz);
 
 	return FOCAL_CALENDAR(oc);

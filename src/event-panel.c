@@ -140,7 +140,7 @@ static gboolean spin_time_on_output(GtkSpinButton* spin, gpointer data)
 	int value = (int) gtk_adjustment_get_value(gtk_spin_button_get_adjustment(spin));
 	char* text = g_strdup_printf("%02d:%02d", value / 60, value % 60);
 	gtk_entry_set_text(GTK_ENTRY(spin), text);
-	free(text);
+	g_free(text);
 	return TRUE;
 }
 
@@ -310,7 +310,7 @@ static void on_description_modified(GtkTextBuffer* description, EventPanel* ew)
 	gtk_text_buffer_get_end_iter(description, &end);
 	char* desc = gtk_text_buffer_get_text(description, &start, &end, FALSE);
 	event_set_description(ew->selected_event, desc);
-	free(desc);
+	g_free(desc);
 	// No signal emitted since the description is not visible in the main view anyway
 }
 

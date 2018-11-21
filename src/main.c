@@ -20,6 +20,7 @@
 #include <curl/curl.h>
 #include <gtk/gtk.h>
 #include <libical/ical.h>
+#include <string.h>
 #include <strings.h>
 
 #define FOCAL_TYPE_APP (focal_app_get_type())
@@ -363,7 +364,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 static void focal_startup(GApplication* app)
 {
 	// needed to generate unique uuids for new events
-	srand(time(NULL) * getpid());
+	g_random_set_seed(time(NULL) * getpid());
 
 	async_curl_init();
 
@@ -392,8 +393,8 @@ static void focal_shutdown(GApplication* app)
 	FocalApp* fm = FOCAL_APP(app);
 	g_slist_free_full(fm->calendars, g_object_unref);
 	g_slist_free_full(fm->accounts, (GDestroyNotify) calendar_config_free);
-	free(fm->path_accounts);
-	free(fm->path_prefs);
+	g_free(fm->path_accounts);
+	g_free(fm->path_prefs);
 	async_curl_cleanup();
 }
 
