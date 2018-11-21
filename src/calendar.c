@@ -59,13 +59,20 @@ void calendar_sync(Calendar* self)
 	FOCAL_CALENDAR_GET_CLASS(self)->sync(self);
 }
 
+gboolean calendar_is_read_only(Calendar* self)
+{
+	return FOCAL_CALENDAR_GET_CLASS(self)->read_only(self);
+}
+
 static void set_property(GObject* object, guint prop_id, const GValue* value, GParamSpec* pspec)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(FOCAL_CALENDAR(object));
 	if (prop_id == PROP_CALENDAR_CONFIG) {
 		priv->config = g_value_get_pointer(value);
 	} else if (prop_id == PROP_REMOTE_AUTH) {
-		FOCAL_CALENDAR_GET_CLASS(object)->attach_authenticator(FOCAL_CALENDAR(object), g_value_get_pointer(value));
+		CalendarClass* cc = FOCAL_CALENDAR_GET_CLASS(object);
+		if (cc->attach_authenticator)
+			cc->attach_authenticator(FOCAL_CALENDAR(object), g_value_get_pointer(value));
 	} else {
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -117,7 +124,7 @@ const char* calendar_get_location(Calendar* self)
 }
 
 #include "caldav-calendar.h"
-#include "local-calendar.h"
+#include "ics-calendar.h"
 #include "oauth2-provider-google.h"
 #include "outlook-calendar.h"
 
@@ -136,8 +143,8 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	case CAL_TYPE_OUTLOOK:
 		cal = outlook_calendar_new(cfg);
 		break;
-	case CAL_TYPE_FILE:
-		cal = local_calendar_new(cfg->location);
+	case CAL_TYPE_ICS_URL:
+		cal = ics_calendar_new(cfg->location);
 		break;
 	}
 

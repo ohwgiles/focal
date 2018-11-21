@@ -67,7 +67,7 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 		g_signal_connect(btn, "clicked", (GCallback) open_web_login, dialog);
 		gtk_grid_attach(GTK_GRID(dialog->grid), btn, 0, 3, 1, 1);
 	} break;
-	case CAL_TYPE_FILE:
+	case CAL_TYPE_ICS_URL:
 		dialog->file_path = gtk_entry_new();
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("File Path"), 0, 3, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->file_path, 1, 3, 1, 1);
@@ -89,7 +89,7 @@ static void populate_fields(AccountEditDialog* dialog)
 		break;
 	case CAL_TYPE_OUTLOOK:
 		break;
-	case CAL_TYPE_FILE:
+	case CAL_TYPE_ICS_URL:
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->location, -1);
 		break;
 	}
@@ -116,7 +116,7 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 			break;
 		case CAL_TYPE_OUTLOOK:
 			break;
-		case CAL_TYPE_FILE:
+		case CAL_TYPE_ICS_URL:
 			free(dialog->config->location);
 			break;
 		}
@@ -134,7 +134,7 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 			break;
 		case CAL_TYPE_OUTLOOK:
 			break;
-		case CAL_TYPE_FILE:
+		case CAL_TYPE_ICS_URL:
 			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
 			break;
 		}

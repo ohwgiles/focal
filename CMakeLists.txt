@@ -46,7 +46,7 @@ add_executable(${PROJECT_NAME}
 	src/cell-renderer-attendee-partstat.c
 	src/event.c
 	src/event-panel.c
-	src/local-calendar.c
+	src/ics-calendar.c
 	src/main.c
 	src/oauth2-provider.c
 	src/oauth2-provider-google.c

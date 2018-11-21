@@ -1,5 +1,5 @@
 /*
- * local-calendar.h
+ * ics-calendar.h
  * This file is part of focal, a calendar application for Linux
  * Copyright 2018 Oliver Giles and focal contributors.
  *
@@ -11,14 +11,14 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef LOCAL_CALENDAR_H
-#define LOCAL_CALENDAR_H
+#ifndef ICS_CALENDAR_H
+#define ICS_CALENDAR_H
 
 #include "calendar.h"
 
-#define LOCAL_CALENDAR_TYPE (local_calendar_get_type())
-G_DECLARE_FINAL_TYPE(LocalCalendar, local_calendar, FOCAL, LOCAL_CALENDAR, Calendar)
+#define ICS_CALENDAR_TYPE (ics_calendar_get_type())
+G_DECLARE_FINAL_TYPE(IcsCalendar, ics_calendar, FOCAL, ICS_CALENDAR, Calendar)
 
-Calendar* local_calendar_new(const char* path);
+Calendar* ics_calendar_new(const char* path);
 
-#endif // LOCAL_CALENDAR_H
+#endif // ICS_CALENDAR_H

@@ -341,6 +341,12 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 		g_signal_connect(ew->starts_at, "changed", G_CALLBACK(on_starts_at_modified), ew);
 		g_signal_connect(ew->duration, "changed", G_CALLBACK(on_duration_modified), ew);
 		g_signal_connect(ew->description, "changed", G_CALLBACK(on_description_modified), ew);
+
+		// TODO: more radical change to popup if the calendar is read only
+		gboolean read_only = calendar_is_read_only(event_get_calendar(ev));
+		gtk_widget_set_sensitive(ew->title, !read_only);
+		gtk_widget_set_sensitive(ew->starts_at, !read_only);
+		gtk_widget_set_sensitive(ew->duration, !read_only);
 	}
 	ew->selected_event = ev;
 }

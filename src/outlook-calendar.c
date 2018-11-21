@@ -404,6 +404,11 @@ static void outlook_sync(Calendar* c)
 	remote_auth_new_request(oc->ba, do_outlook_sync, oc, NULL);
 }
 
+static gboolean outlook_is_read_only(Calendar* c)
+{
+	return FALSE;
+}
+
 static void finalize(GObject* gobject)
 {
 	OutlookCalendar* oc = FOCAL_OUTLOOK_CALENDAR(gobject);
@@ -429,6 +434,7 @@ void outlook_calendar_class_init(OutlookCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = outlook_sync;
+	FOCAL_CALENDAR_CLASS(klass)->read_only = outlook_is_read_only;
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
