@@ -56,6 +56,11 @@ const char* event_get_description(Event* ev)
 	return icalcomponent_get_description(ev->cmp);
 }
 
+const char* event_get_location(Event* ev)
+{
+	return icalcomponent_get_location(ev->cmp);
+}
+
 icaltimetype event_get_dtstart(Event* ev)
 {
 	return icalcomponent_get_dtstart(ev->cmp);
@@ -152,15 +157,21 @@ gboolean event_set_participation_status(Event* ev, icalparameter_partstat status
 	return FALSE;
 }
 
+void event_set_summary(Event* ev, const char* summary)
+{
+	icalcomponent_set_summary(ev->cmp, summary);
+	ev->dirty = TRUE;
+}
+
 void event_set_description(Event* ev, const char* description)
 {
 	icalcomponent_set_description(ev->cmp, description);
 	ev->dirty = TRUE;
 }
 
-void event_set_summary(Event* ev, const char* summary)
+void event_set_location(Event* ev, const char* location)
 {
-	icalcomponent_set_summary(ev->cmp, summary);
+	icalcomponent_set_location(ev->cmp, location);
 	ev->dirty = TRUE;
 }
 

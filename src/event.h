@@ -35,6 +35,7 @@ gboolean event_get_dirty(Event* ev);
 icalcomponent* event_get_component(Event* ev);
 const char* event_get_summary(Event* ev);
 const char* event_get_description(Event* ev);
+const char* event_get_location(Event* ev);
 icaltimetype event_get_dtstart(Event* ev);
 icaltimetype event_get_dtend(Event* ev);
 struct icaldurationtype event_get_duration(Event* ev);
@@ -50,14 +51,14 @@ void event_set_calendar(Event* ev, Calendar* cal);
 // Simple data setters
 void event_set_dtstart(Event* ev, icaltimetype dt);
 void event_set_dtend(Event* ev, icaltimetype dt);
-
 // Sets the participation status of the event by comparing the attendee
 // list with the email address of the Calendar attached to the event.
 gboolean event_set_participation_status(Event* ev, icalparameter_partstat status);
 
 // Data setters make a copy of the passed string
-void event_set_description(Event* ev, const char* description);
 void event_set_summary(Event* ev, const char* summary);
+void event_set_description(Event* ev, const char* description);
+void event_set_location(Event* ev, const char* location);
 void event_set_url(Event* ev, const char* url);
 
 // Updates the etag associated with this event and takes ownership of
