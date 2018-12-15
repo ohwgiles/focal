@@ -13,6 +13,8 @@
  */
 #include "account-edit-dialog.h"
 #include "calendar-config.h"
+#include "oauth2-provider-google.h"
+#include "oauth2-provider-outlook.h"
 #include "remote-auth-oauth2.h"
 
 struct _AccountEditDialog {
@@ -31,6 +33,8 @@ G_DEFINE_TYPE(AccountEditDialog, account_edit_dialog, GTK_TYPE_DIALOG);
 
 static void on_auth_success(AccountEditDialog* dialog)
 {
+	// probably the email address was updated by the authentication process
+	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email)), dialog->config->email, -1);
 	// fake like OK was pressed, close the dialog
 	g_signal_emit_by_name(dialog, "response", GTK_RESPONSE_OK);
 }
@@ -129,10 +133,10 @@ static void dialog_response(AccountEditDialog* dialog, gint response_id)
 			dialog->config->login = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
 			break;
 		case CAL_TYPE_GOOGLE:
-			// TODO: remove duplication with calendar_create, and handle the case where the configured email doesn't match the actual logged in one
-			dialog->config->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", dialog->config->email);
+			g_object_set(dialog->auth, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_GOOGLE, NULL), NULL);
 			break;
 		case CAL_TYPE_OUTLOOK:
+			g_object_set(dialog->auth, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_OUTLOOK, NULL), NULL);
 			break;
 		case CAL_TYPE_ICS_URL:
 			dialog->config->location = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));

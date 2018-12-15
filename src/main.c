@@ -149,12 +149,19 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 	gtk_widget_hide(fm->popover);
 }
 
+static void calendar_config_modified(FocalApp* fm, Calendar* cal)
+{
+	// write config back to file
+	calendar_config_write_to_file(fm->path_accounts, fm->accounts);
+}
+
 static void create_calendars(FocalApp* fm)
 {
 	for (GSList* p = fm->accounts; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
+		g_signal_connect_swapped(cal, "config-modified", (GCallback) calendar_config_modified, fm);
 		fm->calendars = g_slist_append(fm->calendars, cal);
 		calendar_sync(cal);
 	}

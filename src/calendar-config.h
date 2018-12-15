@@ -30,7 +30,6 @@ typedef struct _CalendarConfig {
 	gchar* label;
 	gchar* location;
 	gchar* email;
-	gchar* cookie;
 	gchar* login;
 	CalendarAccountType type;
 } CalendarConfig;

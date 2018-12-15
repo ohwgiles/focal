@@ -19,7 +19,6 @@ void calendar_config_free(CalendarConfig* cfg)
 	g_free(cfg->label);
 	g_free(cfg->location);
 	g_free(cfg->email);
-	g_free(cfg->cookie);
 	g_free(cfg->login);
 	g_free(cfg);
 }
@@ -58,10 +57,8 @@ GSList* calendar_config_load_from_file(const char* config_file)
 			cfg->login = g_key_file_get_string(keyfile, groups[i], "user", NULL);
 		} else if (g_strcmp0(type, "google") == 0) {
 			cfg->type = CAL_TYPE_GOOGLE;
-			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
 		} else if (g_strcmp0(type, "outlook") == 0) {
 			cfg->type = CAL_TYPE_OUTLOOK;
-			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
 		} else if (g_strcmp0(type, "ics") == 0) {
 			cfg->type = CAL_TYPE_ICS_URL;
 			cfg->location = g_key_file_get_string(keyfile, groups[i], "url", NULL);
@@ -96,18 +93,17 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 			break;
 		case CAL_TYPE_GOOGLE:
 			g_key_file_set_string(keyfile, cfg->label, "type", "google");
-			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
 		case CAL_TYPE_OUTLOOK:
 			g_key_file_set_string(keyfile, cfg->label, "type", "outlook");
-			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
 		case CAL_TYPE_ICS_URL:
 			g_key_file_set_string(keyfile, cfg->label, "type", "ics");
 			g_key_file_set_string(keyfile, cfg->label, "url", cfg->location);
 			break;
 		}
-		g_key_file_set_string(keyfile, cfg->label, "email", cfg->email);
+		if (cfg->email)
+			g_key_file_set_string(keyfile, cfg->label, "email", cfg->email);
 	}
 
 	if (!g_key_file_save_to_file(keyfile, config_file, &error)) {
