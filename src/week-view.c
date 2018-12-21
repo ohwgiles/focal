@@ -287,7 +287,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 	} else if (event->type == GDK_2BUTTON_PRESS) {
 		// double-click: request to create an event
 		if (wv->calendars == NULL) {
-			// TODO report error (no calendar configured) via UI. TBD: ask whether to open accounts configuration
+			// TODO report error (no calendar configured) via UI. TBD: ask whether to open accounts configuration
 			return TRUE;
 		}
 
@@ -413,7 +413,7 @@ static void week_view_class_init(WeekViewClass* klass)
 	g_object_class_override_property(goc, PROP_VSCROLL_POLICY, "vscroll-policy");
 
 	week_view_signals[SIGNAL_EVENT_SELECTED] = g_signal_new("event-selected", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
-	week_view_signals[SIGNAL_DATE_RANGE_CHANGED] = g_signal_new("date-range-changed", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	week_view_signals[SIGNAL_DATE_RANGE_CHANGED] = g_signal_new("date-range-changed", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 3, G_TYPE_INT, G_TYPE_INT64, G_TYPE_INT64);
 }
 
 static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpointer user_data)
@@ -437,7 +437,7 @@ static void week_view_init(WeekView* wv)
 {
 	wv->scroll_pos = 410;
 
-	gtk_widget_set_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
+	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
 	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
 	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
@@ -446,11 +446,11 @@ static void week_view_init(WeekView* wv)
 
 static void update_current_time(WeekView* wv)
 {
-	struct icaltimetype today = icaltime_today();
+	struct icaltimetype today = icaltime_current_time_with_zone(wv->current_tz);
 
-	wv->now.minutes = today.minute;
+	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today);
-	wv->now.week = icaltime_week_number(today);
+	wv->now.week = icaltime_week_number(today) + 1;
 	wv->now.year = today.year;
 }
 
@@ -483,6 +483,11 @@ void update_view_span(WeekView* wv)
 	wv->current_view = icaltime_span_new(start, until, 0);
 }
 
+static void week_view_notify_date_range_changed(WeekView* wv)
+{
+	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0, wv->shown_week, wv->current_view.start, wv->current_view.end);
+}
+
 GtkWidget* week_view_new()
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
@@ -500,6 +505,7 @@ GtkWidget* week_view_new()
 
 	cw->now.visible = TRUE;
 	g_timeout_add_seconds(120, &timer_update_current_time, cw);
+
 	return (GtkWidget*) cw;
 }
 
@@ -619,16 +625,15 @@ void week_view_goto_previous(WeekView* wv)
 	if (--wv->shown_week == 0)
 		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
 	week_view_populate_view(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+	week_view_notify_date_range_changed(wv);
 }
 
 void week_view_goto_current(WeekView* wv)
 {
 	wv->shown_week = wv->now.week;
-	if (wv->shown_year != wv->now.year)
-		wv->shown_year = wv->now.year;
+	wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+	week_view_notify_date_range_changed(wv);
 }
 
 void week_view_goto_next(WeekView* wv)
@@ -637,11 +642,14 @@ void week_view_goto_next(WeekView* wv)
 	if (wv->shown_week == 1)
 		wv->shown_year++;
 	week_view_populate_view(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+	week_view_notify_date_range_changed(wv);
 }
 
 void week_view_refresh(WeekView* wv, Event* ev)
 {
+	// TODO: this implementation is a bit brittle. It doesn't handle events changing from
+	// normal events to all-day events or vice versa. Use with caution.
+
 	// find corresponding EventWidget(s), there may be many if it's a recurring event
 	EventWidget** ll = event_get_dtstart(ev).is_date ? wv->events_allday : wv->events_week;
 	for (int i = 0; i < 7; ++i) {
@@ -667,7 +675,7 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	wv->shown_week = icaltime_week_number(dt) + 1;
 	wv->shown_year = dt.year;
 	week_view_populate_view(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+	week_view_notify_date_range_changed(wv);
 
 	GdkRectangle rect;
 	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->weekday_end - wv->weekday_start + 1);
@@ -682,5 +690,5 @@ void week_view_set_day_span(WeekView* wv, int weekday_start, int weekday_end)
 	wv->weekday_start = weekday_start;
 	wv->weekday_end = weekday_end;
 	update_view_span(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
+	week_view_notify_date_range_changed(wv);
 }

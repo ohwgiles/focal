@@ -1,5 +1,5 @@
 /*
- * event-panel.h
+ * ics-calendar.h
  * This file is part of focal, a calendar application for Linux
  * Copyright 2018 Oliver Giles and focal contributors.
  *
@@ -11,16 +11,14 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef EVENT_PANEL_H
-#define EVENT_PANEL_H
+#ifndef ICS_CALENDAR_H
+#define ICS_CALENDAR_H
 
-#include <gtk/gtk.h>
+#include "calendar.h"
 
-#define FOCAL_TYPE_EVENT_PANEL (event_panel_get_type())
-G_DECLARE_FINAL_TYPE(EventPanel, event_panel, FOCAL, EVENT_PANEL, GtkBox)
+#define ICS_CALENDAR_TYPE (ics_calendar_get_type())
+G_DECLARE_FINAL_TYPE(IcsCalendar, ics_calendar, FOCAL, ICS_CALENDAR, Calendar)
 
-typedef struct _Event Event;
+Calendar* ics_calendar_new(const char* path);
 
-void event_panel_set_event(EventPanel* ew, Event* ev);
-
-#endif //EVENT_PANEL_H
+#endif // ICS_CALENDAR_H

@@ -20,17 +20,16 @@ typedef enum {
 	CAL_TYPE_CALDAV,
 	CAL_TYPE_GOOGLE,
 	CAL_TYPE_OUTLOOK,
-	CAL_TYPE_FILE,
+	CAL_TYPE_ICS_URL,
 
 	CAL_TYPE__FIRST = CAL_TYPE_CALDAV,
-	CAL_TYPE__LAST = CAL_TYPE_FILE,
+	CAL_TYPE__LAST = CAL_TYPE_ICS_URL,
 } CalendarAccountType;
 
 typedef struct _CalendarConfig {
 	gchar* label;
 	gchar* location;
 	gchar* email;
-	gchar* cookie;
 	gchar* login;
 	CalendarAccountType type;
 } CalendarConfig;

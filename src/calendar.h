@@ -32,6 +32,7 @@ struct _CalendarClass {
 	void (*delete_event)(Calendar*, Event* event);
 	void (*each_event)(Calendar*, CalendarEachEventCallback callback, void* user);
 	void (*sync)(Calendar*);
+	gboolean (*read_only)(Calendar*);
 	/* protected */
 	void (*attach_authenticator)(Calendar*, RemoteAuth* auth);
 };
@@ -43,6 +44,8 @@ void calendar_delete_event(Calendar* self, Event* event);
 void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, void* user);
 
 void calendar_sync(Calendar* self);
+
+gboolean calendar_is_read_only(Calendar* self);
 
 const CalendarConfig* calendar_get_config(Calendar* self);
 

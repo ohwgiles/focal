@@ -26,6 +26,7 @@ enum {
 
 enum {
 	SIGNAL_AUTH_CANCELLED,
+	SIGNAL_CONFIG_MODIFIED,
 	LAST_SIGNAL
 };
 
@@ -50,6 +51,7 @@ void remote_auth_class_init(RemoteAuthClass* klass)
 	g_object_class_install_property(goc, PROP_CALENDAR_CONFIG, g_param_spec_pointer("cfg", "Calendar Configuration", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
 
 	remote_auth_signals[SIGNAL_AUTH_CANCELLED] = g_signal_new("cancelled", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	remote_auth_signals[SIGNAL_CONFIG_MODIFIED] = g_signal_new("config-modified", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 void remote_auth_init(RemoteAuth* ra)

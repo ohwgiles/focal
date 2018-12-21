@@ -13,6 +13,8 @@
  */
 #include "account-edit-dialog.h"
 #include "calendar-config.h"
+#include "oauth2-provider-google.h"
+#include "oauth2-provider-outlook.h"
 #include "remote-auth-oauth2.h"
 
 struct _AccountEditDialog {
@@ -31,6 +33,8 @@ G_DEFINE_TYPE(AccountEditDialog, account_edit_dialog, GTK_TYPE_DIALOG);
 
 static void on_auth_success(AccountEditDialog* dialog)
 {
+	// probably the email address was updated by the authentication process
+	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email)), dialog->config->email, -1);
 	// fake like OK was pressed, close the dialog
 	g_signal_emit_by_name(dialog, "response", GTK_RESPONSE_OK);
 }
@@ -67,7 +71,7 @@ static void edit_accounts_form_create(AccountEditDialog* dialog)
 		g_signal_connect(btn, "clicked", (GCallback) open_web_login, dialog);
 		gtk_grid_attach(GTK_GRID(dialog->grid), btn, 0, 3, 1, 1);
 	} break;
-	case CAL_TYPE_FILE:
+	case CAL_TYPE_ICS_URL:
 		dialog->file_path = gtk_entry_new();
 		gtk_grid_attach(GTK_GRID(dialog->grid), gtk_label_new("File Path"), 0, 3, 1, 1);
 		gtk_grid_attach(GTK_GRID(dialog->grid), dialog->file_path, 1, 3, 1, 1);
@@ -89,7 +93,7 @@ static void populate_fields(AccountEditDialog* dialog)
 		break;
 	case CAL_TYPE_OUTLOOK:
 		break;
-	case CAL_TYPE_FILE:
+	case CAL_TYPE_ICS_URL:
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path)), dialog->config->location, -1);
 		break;
 	}
@@ -104,38 +108,38 @@ static void account_type_changed(AccountEditDialog* dialog, GtkComboBox* account
 static void dialog_response(AccountEditDialog* dialog, gint response_id)
 {
 	if (response_id == GTK_RESPONSE_OK) {
-		free(dialog->config->label);
-		free(dialog->config->email);
+		g_free(dialog->config->label);
+		g_free(dialog->config->email);
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			free(dialog->config->location);
-			free(dialog->config->login);
+			g_free(dialog->config->location);
+			g_free(dialog->config->login);
 			break;
 		case CAL_TYPE_GOOGLE:
-			free(dialog->config->location);
+			g_free(dialog->config->location);
 			break;
 		case CAL_TYPE_OUTLOOK:
 			break;
-		case CAL_TYPE_FILE:
-			free(dialog->config->location);
+		case CAL_TYPE_ICS_URL:
+			g_free(dialog->config->location);
 			break;
 		}
 		dialog->config->type = (CalendarAccountType) gtk_combo_box_get_active(GTK_COMBO_BOX(dialog->combo_type));
-		dialog->config->label = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
-		dialog->config->email = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email))));
+		dialog->config->label = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->name))));
+		dialog->config->email = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email))));
 		switch (dialog->config->type) {
 		case CAL_TYPE_CALDAV:
-			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
-			dialog->config->login = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
+			dialog->config->location = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_url))));
+			dialog->config->login = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->caldav_user))));
 			break;
 		case CAL_TYPE_GOOGLE:
-			// TODO: remove duplication with calendar_create, and handle the case where the configured email doesn't match the actual logged in one
-			dialog->config->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", dialog->config->email);
+			g_object_set(dialog->auth, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_GOOGLE, NULL), NULL);
 			break;
 		case CAL_TYPE_OUTLOOK:
+			g_object_set(dialog->auth, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_OUTLOOK, NULL), NULL);
 			break;
-		case CAL_TYPE_FILE:
-			dialog->config->location = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
+		case CAL_TYPE_ICS_URL:
+			dialog->config->location = g_strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->file_path))));
 			break;
 		}
 	}

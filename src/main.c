@@ -12,14 +12,17 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "accounts-dialog.h"
+#include "app-header.h"
 #include "async-curl.h"
 #include "calendar-config.h"
 #include "event-panel.h"
+#include "event-popup.h"
 #include "week-view.h"
 
 #include <curl/curl.h>
 #include <gtk/gtk.h>
 #include <libical/ical.h>
+#include <string.h>
 #include <strings.h>
 
 #define FOCAL_TYPE_APP (focal_app_get_type())
@@ -42,6 +45,7 @@ struct _FocalApp {
 	GtkWidget* weekView;
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
+	GtkWidget* revealer;
 };
 
 enum {
@@ -72,8 +76,8 @@ static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* c
 static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalApp* fm)
 {
 	if (ev) {
+		event_popup_set_event(FOCAL_EVENT_POPUP(fm->popover), ev);
 		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
-		event_panel_set_event(FOCAL_EVENT_PANEL(fm->eventDetail), ev);
 		gtk_popover_popup(GTK_POPOVER(fm->popover));
 	}
 }
@@ -98,6 +102,20 @@ static void on_event_modified(EventPanel* event_panel, Event* ev, FocalApp* foca
 	// needed in case the time, duration or summary changed
 	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
+}
+
+static void on_open_event_details(EventPanel* event_panel, Event* ev, FocalApp* focal)
+{
+	gtk_widget_hide(focal->popover);
+	event_panel_set_event(FOCAL_EVENT_PANEL(focal->eventDetail), ev);
+	gtk_revealer_set_reveal_child(GTK_REVEALER(focal->revealer), TRUE);
+	app_header_set_event(FOCAL_APP_HEADER(focal->header), ev);
+}
+
+static void close_details_panel(FocalApp* fa)
+{
+	gtk_revealer_set_reveal_child(GTK_REVEALER(fa->revealer), FALSE);
+	app_header_set_event(FOCAL_APP_HEADER(fa->header), NULL);
 }
 
 void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
@@ -131,12 +149,19 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 	gtk_widget_hide(fm->popover);
 }
 
+static void calendar_config_modified(FocalApp* fm, Calendar* cal)
+{
+	// write config back to file
+	calendar_config_write_to_file(fm->path_accounts, fm->accounts);
+}
+
 static void create_calendars(FocalApp* fm)
 {
 	for (GSList* p = fm->accounts; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
 		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
+		g_signal_connect_swapped(cal, "config-modified", (GCallback) calendar_config_modified, fm);
 		fm->calendars = g_slist_append(fm->calendars, cal);
 		calendar_sync(cal);
 	}
@@ -151,35 +176,7 @@ static void create_calendars(FocalApp* fm)
 	}
 }
 
-static void update_window_title(FocalApp* fm)
-{
-	WeekView* wv = FOCAL_WEEK_VIEW(fm->weekView);
-
-	int week_num = week_view_get_week(wv);
-
-	char title[8];
-	snprintf(title, sizeof(title), "Week %d", week_num);
-
-	gtk_window_set_title(GTK_WINDOW(fm->mainWindow), title);
-
-	// update header subtitle
-	icaltime_span current_view = week_view_get_current_view(wv);
-
-	char start[28];
-	strftime(start, sizeof(start), "%e. %B %G", localtime(&current_view.start));
-
-	// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
-	time_t day_end = current_view.end - 3600;
-	char end[28];
-	strftime(end, sizeof(end), "%e. %B %G", localtime(&day_end));
-
-	char subtitle[64];
-	snprintf(subtitle, sizeof(subtitle), "%s – %s", start, end);
-
-	gtk_header_bar_set_subtitle(GTK_HEADER_BAR(fm->header), subtitle);
-}
-
-static void on_calendar_menu(GtkButton* button, FocalApp* fm)
+static GMenu* create_menu(FocalApp* fm)
 {
 	GMenu* menu_main = g_menu_new();
 	GMenu* menu_calanders = g_menu_new();
@@ -194,12 +191,10 @@ static void on_calendar_menu(GtkButton* button, FocalApp* fm)
 	g_menu_append(menu_main, "Accounts", "win.accounts");
 	g_menu_append(menu_main, "Preferences", "win.prefs");
 
-	GtkWidget* menu = gtk_popover_new_from_model(GTK_WIDGET(button), G_MENU_MODEL(menu_main));
-	gtk_popover_popdown(GTK_POPOVER(menu));
-	gtk_widget_show(menu);
+	return menu_main;
 }
 
-static void on_sync_clicked(GtkButton* button, FocalApp* fm)
+static void do_calendar_sync(FocalApp* fm)
 {
 	for (GSList* p = fm->calendars; p; p = p->next) {
 		Calendar* cal = FOCAL_CALENDAR(p->data);
@@ -277,12 +272,17 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 	gtk_widget_destroy(dialog);
 }
 
+static void workaround_sync_event_detail_with_week_view(GtkWidget* event_panel, GdkRectangle* allocation)
+{
+	gtk_widget_set_size_request(event_panel, allocation->width, allocation->height);
+}
+
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 	fm->weekView = week_view_new();
 	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
-	fm->eventDetail = event_panel_new();
+	fm->eventDetail = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
 
 	// todo: better separation of ui from calendar models?
 	create_calendars(fm);
@@ -293,54 +293,62 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	g_action_map_add_action_entries(G_ACTION_MAP(fm->mainWindow), entries, G_N_ELEMENTS(entries), fm);
 
-	fm->popover = gtk_popover_new(fm->weekView);
+	fm->popover = g_object_new(FOCAL_TYPE_EVENT_POPUP, "relative-to", fm->weekView, NULL);
 	gtk_popover_set_position(GTK_POPOVER(fm->popover), GTK_POS_RIGHT);
-	gtk_container_add(GTK_CONTAINER(fm->popover), fm->eventDetail);
 	gtk_widget_show_all(fm->eventDetail);
 
 	gtk_window_set_type_hint((GtkWindow*) fm->mainWindow, GDK_WINDOW_TYPE_HINT_DIALOG);
 
 	g_signal_connect(fm->weekView, "event-selected", (GCallback) &cal_event_selected, fm);
-	g_signal_connect_swapped(fm->weekView, "date-range-changed", (GCallback) &update_window_title, fm);
 	g_signal_connect(fm->eventDetail, "event-modified", (GCallback) &on_event_modified, fm);
+	g_signal_connect(fm->popover, "event-modified", (GCallback) &on_event_modified, fm);
+	g_signal_connect(fm->popover, "open-details", (GCallback) &on_open_event_details, fm);
 
-	fm->header = gtk_header_bar_new();
-	gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(fm->header), TRUE);
-	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
-	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
-	GtkWidget *prev = gtk_button_new(), *next = gtk_button_new();
-	GtkWidget* current = gtk_button_new_with_label("▼");
-	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_MENU));
-	gtk_button_set_image(GTK_BUTTON(next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_MENU));
-	gtk_container_add(GTK_CONTAINER(nav), prev);
-	gtk_container_add(GTK_CONTAINER(nav), current);
-	gtk_container_add(GTK_CONTAINER(nav), next);
-	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_goto_previous, fm->weekView);
-	g_signal_connect_swapped(current, "clicked", (GCallback) &week_view_goto_current, fm->weekView);
-	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_goto_next, fm->weekView);
+	fm->header = g_object_new(FOCAL_TYPE_APP_HEADER, 0);
+	g_signal_connect_swapped(fm->header, "nav-back", (GCallback) &close_details_panel, fm);
+	g_signal_connect_swapped(fm->header, "nav-prev", (GCallback) &week_view_goto_previous, fm->weekView);
+	g_signal_connect_swapped(fm->header, "nav-current", (GCallback) &week_view_goto_current, fm->weekView);
+	g_signal_connect_swapped(fm->header, "nav-next", (GCallback) &week_view_goto_next, fm->weekView);
+	g_signal_connect_swapped(fm->header, "sync", (GCallback) &do_calendar_sync, fm);
+	g_signal_connect_swapped(fm->header, "request-menu", (GCallback) &create_menu, fm);
+	g_signal_connect_swapped(fm->weekView, "date-range-changed", (GCallback) &app_header_calendar_view_changed, fm->header);
 
-	GtkWidget* menu = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
-	g_signal_connect(menu, "clicked", (GCallback) &on_calendar_menu, fm);
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(fm->header), menu);
-
-	GtkWidget* syncbutton = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(syncbutton), gtk_image_new_from_icon_name("emblem-synchronizing-symbolic", GTK_ICON_SIZE_MENU));
-	g_signal_connect(syncbutton, "clicked", (GCallback) &on_sync_clicked, fm);
-	gtk_header_bar_pack_end(GTK_HEADER_BAR(fm->header), syncbutton);
-
-	gtk_header_bar_pack_start(GTK_HEADER_BAR(fm->header), nav);
 	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), fm->header);
 
+	GtkWidget* overlay = gtk_overlay_new();
 	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
-	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
-	gtk_container_add(GTK_CONTAINER(fm->mainWindow), sw);
 
+	fm->revealer = gtk_revealer_new();
+	// The goal is a full-screen slide-in from right. Using the default halign of GTK_ALIGN_FILL,
+	// the transition happens immediately. This seems to be at least related to the bug described
+	// at https://gitlab.gnome.org/GNOME/gtk/issues/1020. Work around this by aligning the revealer
+	// to the end of its parent container, and synchronizing the details panel's width to the week
+	// view underneath by monitoring its size-allocate signal
+	gtk_revealer_set_transition_type(GTK_REVEALER(fm->revealer), GTK_REVEALER_TRANSITION_TYPE_SLIDE_LEFT);
+	g_object_set(fm->revealer, "halign", GTK_ALIGN_END, NULL);
+	g_signal_connect_swapped(fm->weekView, "size-allocate", (GCallback) workaround_sync_event_detail_with_week_view, fm->eventDetail);
+
+	// - GtkWindow
+	// `-- GtkOverlay
+	//  `- GtkScrolledWindow
+	//  |`- WeekView
+	//  `- GtkRevealer
+	//   `- EventDetails
+	gtk_container_add(GTK_CONTAINER(fm->mainWindow), overlay);
+	gtk_container_add(GTK_CONTAINER(overlay), sw);
+	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
+	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), fm->revealer);
+	gtk_container_add(GTK_CONTAINER(fm->revealer), fm->eventDetail);
+
+	// reasonable default size
 	gtk_window_set_default_size(GTK_WINDOW(fm->mainWindow), 780, 630);
 
-	update_window_title(fm);
+	// minor hack to force a titlebar update. TODO: move the initial week setting outside of weekview?
+	week_view_goto_current(FOCAL_WEEK_VIEW(fm->weekView));
 
 	gtk_widget_show_all(fm->mainWindow);
+
+	app_header_set_event(FOCAL_APP_HEADER(fm->header), NULL);
 }
 
 static void load_preferences(const char* filename, FocalPrefs* out)
@@ -366,7 +374,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 static void focal_startup(GApplication* app)
 {
 	// needed to generate unique uuids for new events
-	srand(time(NULL) * getpid());
+	g_random_set_seed(time(NULL) * getpid());
 
 	async_curl_init();
 
@@ -395,8 +403,8 @@ static void focal_shutdown(GApplication* app)
 	FocalApp* fm = FOCAL_APP(app);
 	g_slist_free_full(fm->calendars, g_object_unref);
 	g_slist_free_full(fm->accounts, (GDestroyNotify) calendar_config_free);
-	free(fm->path_accounts);
-	free(fm->path_prefs);
+	g_free(fm->path_accounts);
+	g_free(fm->path_prefs);
 	async_curl_cleanup();
 }
 

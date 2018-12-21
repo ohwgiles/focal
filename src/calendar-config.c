@@ -16,12 +16,11 @@
 
 void calendar_config_free(CalendarConfig* cfg)
 {
-	free(cfg->label);
-	free(cfg->location);
-	free(cfg->email);
-	free(cfg->cookie);
-	free(cfg->login);
-	free(cfg);
+	g_free(cfg->label);
+	g_free(cfg->location);
+	g_free(cfg->email);
+	g_free(cfg->login);
+	g_free(cfg);
 }
 
 const char* calendar_type_as_string(CalendarAccountType type)
@@ -33,8 +32,8 @@ const char* calendar_type_as_string(CalendarAccountType type)
 		return "Google Calendar";
 	case CAL_TYPE_OUTLOOK:
 		return "Outlook 365";
-	case CAL_TYPE_FILE:
-		return "Local iCal File";
+	case CAL_TYPE_ICS_URL:
+		return "iCal URL";
 	}
 	return NULL;
 }
@@ -58,20 +57,18 @@ GSList* calendar_config_load_from_file(const char* config_file)
 			cfg->login = g_key_file_get_string(keyfile, groups[i], "user", NULL);
 		} else if (g_strcmp0(type, "google") == 0) {
 			cfg->type = CAL_TYPE_GOOGLE;
-			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
 		} else if (g_strcmp0(type, "outlook") == 0) {
 			cfg->type = CAL_TYPE_OUTLOOK;
-			cfg->cookie = g_key_file_get_string(keyfile, groups[i], "cookie", NULL);
-		} else if (g_strcmp0(type, "file") == 0) {
-			cfg->type = CAL_TYPE_FILE;
-			cfg->location = g_key_file_get_string(keyfile, groups[i], "path", NULL);
+		} else if (g_strcmp0(type, "ics") == 0) {
+			cfg->type = CAL_TYPE_ICS_URL;
+			cfg->location = g_key_file_get_string(keyfile, groups[i], "url", NULL);
 		} else {
 			fprintf(stderr, "Unknown calendar type `%s'\n", type);
 			return NULL;
 		}
 		g_free(type);
 
-		cfg->label = strdup(groups[i]);
+		cfg->label = g_strdup(groups[i]);
 		cfg->email = g_key_file_get_string(keyfile, groups[i], "email", NULL);
 		calendar_configs = g_slist_append(calendar_configs, cfg);
 	}
@@ -96,23 +93,22 @@ void calendar_config_write_to_file(const char* config_file, GSList* confs)
 			break;
 		case CAL_TYPE_GOOGLE:
 			g_key_file_set_string(keyfile, cfg->label, "type", "google");
-			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
 		case CAL_TYPE_OUTLOOK:
 			g_key_file_set_string(keyfile, cfg->label, "type", "outlook");
-			g_key_file_set_string(keyfile, cfg->label, "cookie", cfg->cookie);
 			break;
-		case CAL_TYPE_FILE:
-			g_key_file_set_string(keyfile, cfg->label, "type", "file");
-			g_key_file_set_string(keyfile, cfg->label, "path", cfg->location);
+		case CAL_TYPE_ICS_URL:
+			g_key_file_set_string(keyfile, cfg->label, "type", "ics");
+			g_key_file_set_string(keyfile, cfg->label, "url", cfg->location);
 			break;
 		}
-		g_key_file_set_string(keyfile, cfg->label, "email", cfg->email);
+		if (cfg->email)
+			g_key_file_set_string(keyfile, cfg->label, "email", cfg->email);
 	}
 
 	if (!g_key_file_save_to_file(keyfile, config_file, &error)) {
 		fprintf(stderr, "Error saving key file: %s", error->message);
-		free(error);
+		g_error_free(error);
 	}
 	g_key_file_free(keyfile);
 }

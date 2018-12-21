@@ -56,6 +56,11 @@ const char* event_get_description(Event* ev)
 	return icalcomponent_get_description(ev->cmp);
 }
 
+const char* event_get_location(Event* ev)
+{
+	return icalcomponent_get_location(ev->cmp);
+}
+
 icaltimetype event_get_dtstart(Event* ev)
 {
 	return icalcomponent_get_dtstart(ev->cmp);
@@ -78,19 +83,17 @@ const char* event_get_etag(Event* ev)
 
 static char* generate_ical_uid()
 {
-	char* buffer;
 	unsigned char uuid[16];
 	for (int i = 0; i < 16; ++i)
-		uuid[i] = (unsigned char) rand();
+		uuid[i] = (unsigned char) g_random_int();
 	// according to rfc4122 section 4.4
 	uuid[8] = 0x80 | (uuid[8] & 0x5F);
 	uuid[7] = 0x40 | (uuid[7] & 0x0F);
-	asprintf(&buffer, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
-			 uuid[0], uuid[1], uuid[2], uuid[3],
-			 uuid[4], uuid[5], uuid[6], uuid[7],
-			 uuid[8], uuid[9], uuid[10], uuid[11],
-			 uuid[12], uuid[13], uuid[14], uuid[15]);
-	return buffer;
+	return g_strdup_printf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+						   uuid[0], uuid[1], uuid[2], uuid[3],
+						   uuid[4], uuid[5], uuid[6], uuid[7],
+						   uuid[8], uuid[9], uuid[10], uuid[11],
+						   uuid[12], uuid[13], uuid[14], uuid[15]);
 }
 
 const char* event_get_uid(Event* ev)
@@ -99,7 +102,7 @@ const char* event_get_uid(Event* ev)
 	if (uid == NULL) {
 		char* p = generate_ical_uid();
 		icalcomponent_set_uid(ev->cmp, p);
-		free(p);
+		g_free(p);
 		uid = icalcomponent_get_uid(ev->cmp);
 	}
 	return uid;
@@ -140,7 +143,7 @@ gboolean event_set_participation_status(Event* ev, icalparameter_partstat status
 		return FALSE;
 	for (icalproperty* attendee = icalcomponent_get_first_property(ev->cmp, ICAL_ATTENDEE_PROPERTY); attendee; attendee = icalcomponent_get_next_property(ev->cmp, ICAL_ATTENDEE_PROPERTY)) {
 		const char* cal_addr = icalproperty_get_attendee(attendee);
-		if (strncasecmp(cal_addr, "mailto:", 7) == 0 && strcasecmp(&cal_addr[7], participant_email) == 0) {
+		if (g_ascii_strncasecmp(cal_addr, "mailto:", 7) == 0 && g_ascii_strcasecmp(&cal_addr[7], participant_email) == 0) {
 			icalparameter* partstat = icalproperty_get_first_parameter(attendee, ICAL_PARTSTAT_PARAMETER);
 			if (!partstat) {
 				partstat = icalparameter_new(ICAL_PARTSTAT_PARAMETER);
@@ -154,21 +157,27 @@ gboolean event_set_participation_status(Event* ev, icalparameter_partstat status
 	return FALSE;
 }
 
-void event_set_description(Event* ev, const char* description)
-{
-	icalcomponent_set_description(ev->cmp, description);
-	ev->dirty = TRUE;
-}
-
 void event_set_summary(Event* ev, const char* summary)
 {
 	icalcomponent_set_summary(ev->cmp, summary);
 	ev->dirty = TRUE;
 }
 
+void event_set_description(Event* ev, const char* description)
+{
+	icalcomponent_set_description(ev->cmp, description);
+	ev->dirty = TRUE;
+}
+
+void event_set_location(Event* ev, const char* location)
+{
+	icalcomponent_set_location(ev->cmp, location);
+	ev->dirty = TRUE;
+}
+
 void event_set_url(Event* ev, const char* url)
 {
-	ev->url = strdup(url);
+	ev->url = g_strdup(url);
 }
 
 void event_update_etag(Event* ev, char* etag)
@@ -304,7 +313,7 @@ void event_free(Event* ev)
 		icalcomponent_free(parent);
 	else
 		icalcomponent_free(ev->cmp);
-	free(ev->etag);
-	free(ev->url);
+	g_free(ev->etag);
+	g_free(ev->url);
 	g_free(ev);
 }

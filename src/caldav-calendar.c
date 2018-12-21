@@ -13,6 +13,7 @@
  */
 #include <curl/curl.h>
 #include <libxml/SAX2.h>
+#include <string.h>
 
 #include "async-curl.h"
 #include "caldav-calendar.h"
@@ -694,6 +695,12 @@ static void caldav_sync(Calendar* c)
 	remote_auth_new_request(rc->auth, do_caldav_sync, rc, NULL);
 }
 
+static gboolean caldav_is_read_only(Calendar* c)
+{
+	// TODO
+	return FALSE;
+}
+
 static void caldav_auth_cancelled(CaldavCalendar* rc)
 {
 	rc->op_pending = FALSE;
@@ -735,6 +742,8 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->delete_event = delete_event;
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
+	FOCAL_CALENDAR_CLASS(klass)->read_only = caldav_is_read_only;
+
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->constructed = constructed;
 	G_OBJECT_CLASS(klass)->finalize = finalize;

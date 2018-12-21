@@ -27,6 +27,7 @@ G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
 enum {
 	SIGNAL_SYNC_DONE,
 	SIGNAL_REQUEST_PASSWORD,
+	SIGNAL_CONFIG_MODIFIED,
 	LAST_SIGNAL
 };
 
@@ -59,13 +60,28 @@ void calendar_sync(Calendar* self)
 	FOCAL_CALENDAR_GET_CLASS(self)->sync(self);
 }
 
+gboolean calendar_is_read_only(Calendar* self)
+{
+	return FOCAL_CALENDAR_GET_CLASS(self)->read_only(self);
+}
+
+static void on_config_modified(Calendar* self)
+{
+	g_signal_emit(self, calendar_signals[SIGNAL_CONFIG_MODIFIED], 0);
+}
+
 static void set_property(GObject* object, guint prop_id, const GValue* value, GParamSpec* pspec)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(FOCAL_CALENDAR(object));
 	if (prop_id == PROP_CALENDAR_CONFIG) {
 		priv->config = g_value_get_pointer(value);
 	} else if (prop_id == PROP_REMOTE_AUTH) {
-		FOCAL_CALENDAR_GET_CLASS(object)->attach_authenticator(FOCAL_CALENDAR(object), g_value_get_pointer(value));
+		CalendarClass* cc = FOCAL_CALENDAR_GET_CLASS(object);
+		RemoteAuth* auth = FOCAL_REMOTE_AUTH(g_value_get_pointer(value));
+		if (cc->attach_authenticator)
+			cc->attach_authenticator(FOCAL_CALENDAR(object), auth);
+		if (auth)
+			g_signal_connect_swapped(auth, "config-modified", G_CALLBACK(on_config_modified), object);
 	} else {
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -77,6 +93,7 @@ void calendar_class_init(CalendarClass* klass)
 	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	// TODO: learn how to use G_TYPE_STRING in return value properly...
 	calendar_signals[SIGNAL_REQUEST_PASSWORD] = g_signal_new("request-password", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 2, G_TYPE_POINTER, G_TYPE_POINTER);
+	calendar_signals[SIGNAL_CONFIG_MODIFIED] = g_signal_new("config-modified", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	goc->set_property = set_property;
 	g_object_class_install_property(goc, PROP_CALENDAR_CONFIG, g_param_spec_pointer("cfg", "Calendar Configuration", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
 	g_object_class_install_property(goc, PROP_REMOTE_AUTH, g_param_spec_pointer("auth", "Remote Authenticator", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
@@ -117,7 +134,7 @@ const char* calendar_get_location(Calendar* self)
 }
 
 #include "caldav-calendar.h"
-#include "local-calendar.h"
+#include "ics-calendar.h"
 #include "oauth2-provider-google.h"
 #include "outlook-calendar.h"
 
@@ -126,7 +143,6 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	Calendar* cal;
 	switch (cfg->type) {
 	case CAL_TYPE_GOOGLE:
-		// TODO: remove duplication with AccountEditDialog, and handle the case where the configured email doesn't match the actual logged in one
 		cfg->location = g_strdup_printf("https://apidata.googleusercontent.com/caldav/v2/%s/events/", cfg->email);
 		cal = g_object_new(CALDAV_CALENDAR_TYPE, "cfg", cfg, "auth", g_object_new(REMOTE_AUTH_OAUTH2_TYPE, "cfg", cfg, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_GOOGLE, NULL), NULL), NULL);
 		break;
@@ -136,8 +152,8 @@ Calendar* calendar_create(CalendarConfig* cfg)
 	case CAL_TYPE_OUTLOOK:
 		cal = outlook_calendar_new(cfg);
 		break;
-	case CAL_TYPE_FILE:
-		cal = local_calendar_new(cfg->location);
+	case CAL_TYPE_ICS_URL:
+		cal = ics_calendar_new(cfg->location);
 		break;
 	}
 
