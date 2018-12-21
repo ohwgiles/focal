@@ -315,9 +315,9 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_container_add(GTK_CONTAINER(nav), prev);
 	gtk_container_add(GTK_CONTAINER(nav), current);
 	gtk_container_add(GTK_CONTAINER(nav), next);
-	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_go_previous, fm->weekView);
-	g_signal_connect_swapped(current, "clicked", (GCallback) &week_view_go_current, fm->weekView);
-	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_go_next, fm->weekView);
+	g_signal_connect_swapped(prev, "clicked", (GCallback) &week_view_goto_previous, fm->weekView);
+	g_signal_connect_swapped(current, "clicked", (GCallback) &week_view_goto_current, fm->weekView);
+	g_signal_connect_swapped(next, "clicked", (GCallback) &week_view_goto_next, fm->weekView);
 
 	GtkWidget* menu = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
