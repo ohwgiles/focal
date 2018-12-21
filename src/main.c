@@ -353,7 +353,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 	GError* err = NULL;
 	g_key_file_load_from_file(kf, filename, G_KEY_FILE_KEEP_COMMENTS, &err);
 	if (err) {
-		g_critical(err->message);
+		g_critical(err->message, G_LOG_LEVEL_CRITICAL);
 		g_error_free(err);
 		g_key_file_free(kf);
 		return;
