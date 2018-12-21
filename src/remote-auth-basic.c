@@ -85,7 +85,7 @@ static void on_password_stored(GObject* source, GAsyncResult* result, gpointer u
 	RemoteAuthBasic* ba = (RemoteAuthBasic*) user;
 	secret_password_store_finish(result, &error);
 	if (error != NULL) {
-		g_warning(error->message, G_LOG_LEVEL_WARNING);
+		g_warning("%s", error->message);
 		g_error_free(error);
 		// cancel current operation
 		g_free(ba->ctx);
@@ -106,7 +106,7 @@ static void on_password_lookup(GObject* source, GAsyncResult* result, gpointer u
 	CalendarConfig* cfg = ba->cfg;
 
 	if (error != NULL) {
-		g_critical(error->message, G_LOG_LEVEL_CRITICAL);
+		g_critical("%s", error->message);
 		g_error_free(error);
 	} else if (password == NULL) {
 		// no matching password found, prompt the user to create one
