@@ -444,15 +444,6 @@ static void week_view_init(WeekView* wv)
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
 
-static int week_number(struct tm ld)
-{
-	int DAYS_PER_WEEK = 7;
-
-	const int wday = ld.tm_wday;
-	const int delta = wday ? wday - 1 : DAYS_PER_WEEK - 1;
-	return (ld.tm_yday + DAYS_PER_WEEK - delta) / DAYS_PER_WEEK;
-}
-
 static void update_current_time(WeekView* wv)
 {
 	struct icaltimetype today = icaltime_today();
@@ -627,15 +618,6 @@ void week_view_goto_previous(WeekView* wv)
 {
 	if (--wv->shown_week == 0)
 		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
-	week_view_populate_view(wv);
-	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
-}
-
-void week_view_go_current(WeekView* wv)
-{
-	wv->shown_week = wv->now.week;
-	if (wv->shown_year != wv->now.year)
-		wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
