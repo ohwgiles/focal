@@ -18,6 +18,7 @@
 
 struct _AppHeader {
 	GtkHeaderBar parent;
+	GtkWidget* btn_current;
 	GtkWidget* btn_next;
 	GtkWidget* btn_sync;
 	GtkWidget* btn_menu;
@@ -36,6 +37,7 @@ G_DEFINE_TYPE(AppHeader, app_header, GTK_TYPE_HEADER_BAR)
 enum {
 	SIGNAL_NAV_BACK,
 	SIGNAL_NAV_PREV,
+	SIGNAL_NAV_CURRENT,
 	SIGNAL_NAV_NEXT,
 	SIGNAL_REQUEST_MENU,
 	SIGNAL_CALS_SYNC,
@@ -78,6 +80,11 @@ static void app_header_nav_prev(AppHeader* ah)
 	g_signal_emit(ah, app_header_signals[ah->event ? SIGNAL_NAV_BACK : SIGNAL_NAV_PREV], 0);
 }
 
+static void app_header_nav_current(AppHeader* ah)
+{
+	g_signal_emit(ah, app_header_signals[SIGNAL_NAV_CURRENT], 0);
+}
+
 static void app_header_nav_next(AppHeader* ah)
 {
 	g_signal_emit(ah, app_header_signals[SIGNAL_NAV_NEXT], 0);
@@ -115,12 +122,15 @@ void app_header_init(AppHeader* ah)
 	GtkWidget* nav = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_style_context_add_class(gtk_widget_get_style_context(nav), "linked");
 	GtkWidget* prev = gtk_button_new();
+	ah->btn_current = gtk_button_new_with_label("▼");
 	ah->btn_next = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(prev), gtk_image_new_from_icon_name("pan-start-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_button_set_image(GTK_BUTTON(ah->btn_next), gtk_image_new_from_icon_name("pan-end-symbolic", GTK_ICON_SIZE_MENU));
 	gtk_container_add(GTK_CONTAINER(nav), prev);
+	gtk_container_add(GTK_CONTAINER(nav), ah->btn_current);
 	gtk_container_add(GTK_CONTAINER(nav), ah->btn_next);
 	g_signal_connect_swapped(prev, "clicked", (GCallback) &app_header_nav_prev, ah);
+	g_signal_connect_swapped(ah->btn_current, "clicked", (GCallback) &app_header_nav_current, ah);
 	g_signal_connect_swapped(ah->btn_next, "clicked", (GCallback) &app_header_nav_next, ah);
 
 	ah->btn_menu = gtk_button_new();
@@ -149,6 +159,7 @@ void app_header_init(AppHeader* ah)
 void app_header_class_init(AppHeaderClass* klass)
 {
 	app_header_signals[SIGNAL_NAV_BACK] = g_signal_new("nav-back", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	app_header_signals[SIGNAL_NAV_CURRENT] = g_signal_new("nav-current", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	app_header_signals[SIGNAL_NAV_PREV] = g_signal_new("nav-prev", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	app_header_signals[SIGNAL_NAV_NEXT] = g_signal_new("nav-next", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	app_header_signals[SIGNAL_REQUEST_MENU] = g_signal_new("request-menu", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 0);
@@ -160,6 +171,7 @@ void app_header_set_event(AppHeader* ah, Event* ev)
 	if ((ah->event = ev)) {
 		// Event mode
 		// Show save/delete, title text refers to event
+		gtk_widget_hide(ah->btn_current);
 		gtk_widget_hide(ah->btn_next);
 		gtk_widget_hide(ah->btn_menu);
 		gtk_widget_hide(ah->btn_sync);
@@ -168,6 +180,7 @@ void app_header_set_event(AppHeader* ah, Event* ev)
 	} else {
 		// Calendar mode
 		// Show prev/next week, title text refers to current display
+		gtk_widget_show(ah->btn_current);
 		gtk_widget_show(ah->btn_next);
 		gtk_widget_show(ah->btn_menu);
 		gtk_widget_show(ah->btn_sync);

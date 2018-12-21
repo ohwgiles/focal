@@ -30,9 +30,10 @@ void week_view_add_calendar(WeekView* widget, Calendar* cal);
 void week_view_remove_calendar(WeekView* wv, Calendar* cal);
 int week_view_get_week(WeekView* wv);
 icaltime_span week_view_get_current_view(WeekView* wv);
-void week_view_previous(WeekView* wv);
-void week_view_next(WeekView* wv);
+void week_view_goto_previous(WeekView* wv);
+void week_view_goto_current(WeekView* wv);
+void week_view_goto_next(WeekView* wv);
 void week_view_refresh(WeekView* wv, Event* ev);
-void week_view_set_day_span(WeekView* wv, int day_start, int day_end);
+void week_view_set_day_span(WeekView* wv, int weekday_start, int weekday_end);
 
 #endif // WEEK_VIEW_H

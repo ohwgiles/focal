@@ -306,8 +306,9 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	fm->header = g_object_new(FOCAL_TYPE_APP_HEADER, 0);
 	g_signal_connect_swapped(fm->header, "nav-back", (GCallback) &close_details_panel, fm);
-	g_signal_connect_swapped(fm->header, "nav-prev", (GCallback) &week_view_previous, fm->weekView);
-	g_signal_connect_swapped(fm->header, "nav-next", (GCallback) &week_view_next, fm->weekView);
+	g_signal_connect_swapped(fm->header, "nav-prev", (GCallback) &week_view_goto_previous, fm->weekView);
+	g_signal_connect_swapped(fm->header, "nav-current", (GCallback) &week_view_goto_current, fm->weekView);
+	g_signal_connect_swapped(fm->header, "nav-next", (GCallback) &week_view_goto_next, fm->weekView);
 	g_signal_connect_swapped(fm->header, "sync", (GCallback) &do_calendar_sync, fm);
 	g_signal_connect_swapped(fm->header, "request-menu", (GCallback) &create_menu, fm);
 	g_signal_connect_swapped(fm->weekView, "date-range-changed", (GCallback) &app_header_calendar_view_changed, fm->header);
@@ -343,7 +344,7 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_window_set_default_size(GTK_WINDOW(fm->mainWindow), 780, 630);
 
 	// minor hack to force a titlebar update. TODO: move the initial week setting outside of weekview?
-	week_view_previous(FOCAL_WEEK_VIEW(fm->weekView)), week_view_next(FOCAL_WEEK_VIEW(fm->weekView));
+	week_view_goto_current(FOCAL_WEEK_VIEW(fm->weekView));
 
 	gtk_widget_show_all(fm->mainWindow);
 
@@ -360,7 +361,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 	GError* err = NULL;
 	g_key_file_load_from_file(kf, filename, G_KEY_FILE_KEEP_COMMENTS, &err);
 	if (err) {
-		g_critical(err->message);
+		g_critical("%s", err->message);
 		g_error_free(err);
 		g_key_file_free(kf);
 		return;

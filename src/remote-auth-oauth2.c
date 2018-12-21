@@ -101,7 +101,7 @@ static void on_access_token_stored(GObject* source, GAsyncResult* result, gpoint
 	GError* error = NULL;
 	secret_password_store_finish(result, &error);
 	if (error != NULL) {
-		g_critical(error->message);
+		g_critical("%s", error->message);
 		g_error_free(error);
 	} else {
 		// fetch the auth token again so we can continue with the original async request
@@ -114,7 +114,7 @@ static void on_refresh_token_stored(GObject* source, GAsyncResult* result, gpoin
 	GError* error = NULL;
 	secret_password_store_finish(result, &error);
 	if (error != NULL) {
-		g_critical(error->message);
+		g_critical("%s", error->message);
 		g_error_free(error);
 	}
 }
@@ -224,7 +224,7 @@ static void on_refresh_token_lookup(GObject* source, GAsyncResult* result, gpoin
 	RemoteAuthOAuth2* oa = (RemoteAuthOAuth2*) user;
 
 	if (error != NULL) {
-		g_critical(error->message);
+		g_critical("%s", error->message);
 		g_error_free(error);
 		g_free(oa->ctx);
 		oa->ctx = NULL;
@@ -254,7 +254,7 @@ static void on_access_token_lookup_complete(GObject* source, GAsyncResult* resul
 	RemoteAuthOAuth2* ba = (RemoteAuthOAuth2*) user;
 
 	if (error != NULL) {
-		g_critical(error->message);
+		g_critical("%s", error->message);
 		g_error_free(error);
 	} else if (token == NULL) {
 		// no auth token in password store, try to acquire another using the refresh token
