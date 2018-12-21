@@ -444,24 +444,14 @@ static void week_view_init(WeekView* wv)
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
 
-static int week_number(struct tm ld)
-{
-	int DAYS_PER_WEEK = 7;
-
-	const int wday = ld.tm_wday;
-	const int delta = wday ? wday - 1 : DAYS_PER_WEEK - 1;
-	return (ld.tm_yday + DAYS_PER_WEEK - delta) / DAYS_PER_WEEK;
-}
-
 static void update_current_time(WeekView* wv)
 {
-	struct tm ld;
-	time_t now = time(NULL);
-	localtime_r(&now, &ld);
-	wv->now.minutes = ld.tm_hour * 60 + ld.tm_min;
-	wv->now.weekday = ld.tm_wday;
-	wv->now.week = week_number(ld);
-	wv->now.year = ld.tm_year + 1900;
+	struct icaltimetype today = icaltime_today();
+
+	wv->now.minutes = today.minute;
+	wv->now.weekday = icaltime_day_of_week(today);
+	wv->now.week = icaltime_week_number(today);
+	wv->now.year = today.year;
 }
 
 static gboolean timer_update_current_time(gpointer user_data)
@@ -501,14 +491,13 @@ GtkWidget* week_view_new()
 	cw->current_tz = icaltimezone_get_builtin_timezone(zoneinfo_link + strlen("/usr/share/zoneinfo/"));
 	free(zoneinfo_link);
 
-	icaltimetype today = icaltime_today();
+	update_current_time(cw);
 
 	// initially show current week of current year
-	cw->shown_week = icaltime_week_number(today) + 1;
-	cw->shown_year = today.year;
+	cw->shown_week = cw->now.week;
+	cw->shown_year = cw->now.year;
 	update_view_span(cw);
 
-	update_current_time(cw);
 	cw->now.visible = TRUE;
 	g_timeout_add_seconds(120, &timer_update_current_time, cw);
 	return (GtkWidget*) cw;
@@ -625,7 +614,7 @@ void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 	week_view_populate_view(wv);
 }
 
-void week_view_go_previous(WeekView* wv)
+void week_view_goto_previous(WeekView* wv)
 {
 	if (--wv->shown_week == 0)
 		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
@@ -633,7 +622,7 @@ void week_view_go_previous(WeekView* wv)
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
-void week_view_go_current(WeekView* wv)
+void week_view_goto_current(WeekView* wv)
 {
 	wv->shown_week = wv->now.week;
 	if (wv->shown_year != wv->now.year)
@@ -642,7 +631,7 @@ void week_view_go_current(WeekView* wv)
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0);
 }
 
-void week_view_go_next(WeekView* wv)
+void week_view_goto_next(WeekView* wv)
 {
 	wv->shown_week = wv->shown_week % weeks_in_year(wv->shown_year) + 1;
 	if (wv->shown_week == 1)
