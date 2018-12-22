@@ -44,8 +44,10 @@ struct _WeekView {
 	icaltime_span current_view;
 	struct {
 		gboolean visible;
+		int day;
 		int weekday;
 		int minutes;
+		int month;
 		int week;
 		int year;
 	} now;
@@ -113,8 +115,9 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	const int num_days = wv->weekday_end - wv->weekday_start + 1;
 	const double dashes[] = {1.0};
 
-	double dark = 0.3, med = 0.65, light = 0.85;
-	cairo_set_source_rgb(cr, dark, dark, dark);
+	double header_bg = 0.2, header_fg_50 = 0.4,
+		   bg = 0.3, fg_50 = 0.65, fg_100 = 0.85;
+	cairo_set_source_rgb(cr, bg, bg, bg);
 	cairo_set_line_width(cr, 1.0);
 
 	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT;
@@ -130,19 +133,19 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		if (y > wv->y + wv->height)
 			break;
 		if (hh % 2 == 0) {
-			cairo_set_source_rgb(cr, med, med, med);
+			cairo_set_source_rgb(cr, fg_50, fg_50, fg_50);
 			cairo_set_dash(cr, NULL, 0, 0);
 			cairo_move_to(cr, wv->x, y);
 			cairo_rel_line_to(cr, wv->width, 0);
 			cairo_stroke(cr);
 			// draw hour labels
-			char hourlabel[8];
+			char hour_label[8];
 			cairo_move_to(cr, wv->x + 5, y + 12);
-			sprintf(hourlabel, "%02d", hh / 2);
-			cairo_set_source_rgb(cr, dark, dark, dark);
-			cairo_show_text(cr, hourlabel);
+			sprintf(hour_label, "%02d", hh / 2);
+			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
+			cairo_show_text(cr, hour_label);
 		} else {
-			cairo_set_source_rgb(cr, light, light, light);
+			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
 			cairo_set_dash(cr, dashes, 1, 0);
 			cairo_move_to(cr, wv->x + SIDEBAR_WIDTH, y);
 			cairo_rel_line_to(cr, wv->width, 0);
@@ -180,7 +183,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	}
 
 	// header
-	cairo_set_source_rgb(cr, 1, 1, 1);
+	cairo_set_source_rgb(cr, header_bg, header_bg, header_bg);
 	cairo_rectangle(cr, 0, 0, wv->width, day_begin_yoffset);
 	cairo_fill(cr);
 
@@ -198,35 +201,48 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	// draw vertical lines for days
 	cairo_set_dash(cr, NULL, 0, 0);
+
 	icaltimetype day = icaltime_from_timet_with_zone(wv->current_view.start, 1, wv->current_tz);
 	for (int d = 0; d < num_days; ++d, icaltime_adjust(&day, 1, 0, 0, 0)) {
 		double x = wv->x + SIDEBAR_WIDTH + d * day_width;
-		char daylabel[16];
+		char day_label[16];
 		time_t tt = icaltime_as_timet(day);
 		struct tm* t = localtime(&tt);
 
-		strftime(daylabel, 16, "%e", t);
-		cairo_move_to(cr, x + 5, wv->y + HEADER_HEIGHT - 5);
-		cairo_set_font_size(cr, 22);
-		cairo_set_source_rgb(cr, dark, dark, dark);
-		cairo_show_text(cr, daylabel);
+		// day of month
+		strftime(day_label, 16, "%e", t);
+		cairo_move_to(cr, x + 8, wv->y + HEADER_HEIGHT - 14);
+		cairo_set_font_size(cr, 14);
 
-		strftime(daylabel, 16, "%a", t);
+		if (day.month == wv->now.month && day.day == wv->now.day) {
+			cairo_set_source_rgb(cr, 0.1, 0.7, 1);
+		} else {
+			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
+		}
+		cairo_show_text(cr, day_label);
 
-		for (char* p = daylabel; *p; ++p)
+		// weekday abbreviation
+		strftime(day_label, 16, "%a", t);
+
+		for (char* p = day_label; *p; ++p)
 			*p = toupper(*p);
-		cairo_move_to(cr, x + 35, wv->y + HEADER_HEIGHT - 5);
-		cairo_set_font_size(cr, 11);
-		cairo_show_text(cr, daylabel);
+		cairo_move_to(cr, x + 38, wv->y + HEADER_HEIGHT - 14);
+		cairo_set_font_size(cr, 14);
+		cairo_show_text(cr, day_label);
 
-		cairo_set_source_rgb(cr, med, med, med);
+		cairo_set_source_rgb(cr, fg_50, fg_50, fg_50);
 		cairo_move_to(cr, x, wv->y + HEADER_HEIGHT);
 		cairo_rel_line_to(cr, 0, wv->height);
+		cairo_stroke(cr);
+
+		cairo_set_source_rgb(cr, header_fg_50, header_fg_50, header_fg_50);
+		cairo_move_to(cr, x, wv->y);
+		cairo_rel_line_to(cr, 0, HEADER_HEIGHT);
 		cairo_stroke(cr);
 	}
 
 	// top bar
-	cairo_set_source_rgb(cr, dark, dark, dark);
+	cairo_set_source_rgb(cr, bg, bg, bg);
 	cairo_move_to(cr, wv->x, wv->y + HEADER_HEIGHT);
 	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_move_to(cr, wv->x, wv->y + day_begin_yoffset);
@@ -448,8 +464,10 @@ static void update_current_time(WeekView* wv)
 {
 	struct icaltimetype today = icaltime_current_time_with_zone(wv->current_tz);
 
+	wv->now.day = today.day;
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today);
+	wv->now.month = today.month;
 	wv->now.week = icaltime_week_number(today) + 1;
 	wv->now.year = today.year;
 }
