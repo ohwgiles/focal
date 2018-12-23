@@ -633,6 +633,8 @@ void week_view_goto_current(WeekView* wv)
 	if (wv->now.weekday == 1 && wv->weekday_start == 1 && wv->weekday_end == 7) {
 		// current day is sunday, displayed week span is monday to sunday
 		wv->shown_week = wv->now.week - 1;
+	} else {
+		wv->shown_week = wv->now.week;
 	}
 
 	wv->shown_year = wv->now.year;
