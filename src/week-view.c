@@ -46,7 +46,7 @@ struct _WeekView {
 		gboolean visible;
 		int weekday;
 		int minutes;
-		int week; // 0-based week number of year
+		int week; // 1-based week number of year
 		int year;
 	} now;
 };
@@ -450,7 +450,7 @@ static void update_current_time(WeekView* wv)
 
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today);
-	wv->now.week = icaltime_week_number(today);
+	wv->now.week = icaltime_week_number(today) + 1;
 	wv->now.year = today.year;
 }
 
@@ -630,7 +630,11 @@ void week_view_goto_previous(WeekView* wv)
 
 void week_view_goto_current(WeekView* wv)
 {
-	wv->shown_week = wv->now.week;
+	if (wv->now.weekday == 1 && wv->weekday_start == 1 && wv->weekday_end == 7) {
+		// current day is sunday, displayed week span is monday to sunday
+		wv->shown_week = wv->now.week - 1;
+	}
+
 	wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
 	week_view_notify_date_range_changed(wv);
