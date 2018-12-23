@@ -46,7 +46,7 @@ struct _WeekView {
 		gboolean visible;
 		int weekday;
 		int minutes;
-		int week;
+		int week; // 0-based week number of year
 		int year;
 	} now;
 };
@@ -450,7 +450,7 @@ static void update_current_time(WeekView* wv)
 
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today);
-	wv->now.week = icaltime_week_number(today) + 1;
+	wv->now.week = icaltime_week_number(today);
 	wv->now.year = today.year;
 }
 

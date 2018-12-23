@@ -56,7 +56,7 @@ static void update_title(AppHeader* ah)
 
 	} else {
 		char title[8];
-		snprintf(title, sizeof(title), "Week %d", ah->week_number);
+		snprintf(title, sizeof(title), "Week %d", ah->week_number + 1);
 		gtk_window_set_title(window, title);
 
 		// update header subtitle
