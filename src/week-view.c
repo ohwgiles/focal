@@ -69,6 +69,14 @@ enum {
 	PROP_VSCROLL_POLICY,
 };
 
+GdkRGBA *color_bg;
+GdkRGBA *color_header_bg;
+GdkRGBA *color_fg;
+GdkRGBA *color_fg_50;
+GdkRGBA *color_header_divider;
+GdkRGBA *color_current_time_marker;
+GdkRGBA *color_current_day;
+
 #define HEADER_HEIGHT 35.5
 #define ALLDAY_HEIGHT 20.0
 
@@ -115,9 +123,6 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	const int num_days = wv->weekday_end - wv->weekday_start + 1;
 	const double dashes[] = {1.0};
 
-	double header_bg = 0.2, header_fg_50 = 0.4,
-		   bg = 0.3, fg_50 = 0.65, fg_100 = 0.85;
-	cairo_set_source_rgb(cr, bg, bg, bg);
 	cairo_set_line_width(cr, 1.0);
 
 	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT;
@@ -128,24 +133,30 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 
+	// bg of hours legend
+	gdk_cairo_set_source_rgba(cr, color_header_bg);
+	cairo_rectangle(cr, 0, 0, SIDEBAR_WIDTH, wv->height);
+	cairo_fill(cr);
+
+	// horizontal hour and half-hour divider lines
 	for (int hh = first_visible_halfhour;; ++hh) {
 		double y = wv->y + day_begin_yoffset + hh * HALFHOUR_HEIGHT - (int) wv->scroll_pos;
 		if (y > wv->y + wv->height)
 			break;
 		if (hh % 2 == 0) {
-			cairo_set_source_rgb(cr, fg_50, fg_50, fg_50);
+			gdk_cairo_set_source_rgba(cr, color_fg_50);
 			cairo_set_dash(cr, NULL, 0, 0);
 			cairo_move_to(cr, wv->x, y);
 			cairo_rel_line_to(cr, wv->width, 0);
 			cairo_stroke(cr);
 			// draw hour labels
 			char hour_label[8];
-			cairo_move_to(cr, wv->x + 5, y + 12);
+			cairo_move_to(cr, wv->x + 5, y + 13);
 			sprintf(hour_label, "%02d", hh / 2);
-			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
+			gdk_cairo_set_source_rgba(cr, color_fg);
 			cairo_show_text(cr, hour_label);
 		} else {
-			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
+			gdk_cairo_set_source_rgba(cr, color_fg);
 			cairo_set_dash(cr, dashes, 1, 0);
 			cairo_move_to(cr, wv->x + SIDEBAR_WIDTH, y);
 			cairo_rel_line_to(cr, wv->width, 0);
@@ -173,17 +184,18 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		}
 	}
 
+	// current time indicator line
 	if (wv->now.visible) {
 		double nowY = wv->y + day_begin_yoffset + wv->now.minutes * HALFHOUR_HEIGHT / 30 - (int) wv->scroll_pos;
-		cairo_set_source_rgb(cr, 1, 0, 0);
+		gdk_cairo_set_source_rgba(cr, color_current_time_marker);
 		cairo_set_dash(cr, NULL, 0, 0);
 		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + (wv->now.weekday - wv->weekday_start) * day_width, nowY);
 		cairo_rel_line_to(cr, day_width, 0);
 		cairo_stroke(cr);
 	}
 
-	// header
-	cairo_set_source_rgb(cr, header_bg, header_bg, header_bg);
+	// header bg
+	gdk_cairo_set_source_rgba(cr, color_header_bg);
 	cairo_rectangle(cr, 0, 0, wv->width, day_begin_yoffset);
 	cairo_fill(cr);
 
@@ -199,7 +211,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	}
 	g_object_unref(layout);
 
-	// draw vertical lines for days
+	// vertical lines for days
 	cairo_set_dash(cr, NULL, 0, 0);
 
 	icaltimetype day = icaltime_from_timet_with_zone(wv->current_view.start, 1, wv->current_tz);
@@ -215,9 +227,9 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		cairo_set_font_size(cr, 14);
 
 		if (day.month == wv->now.month && day.day == wv->now.day) {
-			cairo_set_source_rgb(cr, 0.1, 0.7, 1);
+			gdk_cairo_set_source_rgba(cr, color_current_day);
 		} else {
-			cairo_set_source_rgb(cr, fg_100, fg_100, fg_100);
+			gdk_cairo_set_source_rgba(cr, color_fg);
 		}
 		cairo_show_text(cr, day_label);
 
@@ -226,28 +238,62 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 		for (char* p = day_label; *p; ++p)
 			*p = toupper(*p);
-		cairo_move_to(cr, x + 38, wv->y + HEADER_HEIGHT - 14);
+		cairo_move_to(cr, x + 30, wv->y + HEADER_HEIGHT - 14);
 		cairo_set_font_size(cr, 14);
 		cairo_show_text(cr, day_label);
 
-		cairo_set_source_rgb(cr, fg_50, fg_50, fg_50);
+		gdk_cairo_set_source_rgba(cr, color_fg_50);
 		cairo_move_to(cr, x, wv->y + HEADER_HEIGHT);
 		cairo_rel_line_to(cr, 0, wv->height);
 		cairo_stroke(cr);
 
-		cairo_set_source_rgb(cr, header_fg_50, header_fg_50, header_fg_50);
+		gdk_cairo_set_source_rgba(cr, color_header_divider);
 		cairo_move_to(cr, x, wv->y);
 		cairo_rel_line_to(cr, 0, HEADER_HEIGHT);
 		cairo_stroke(cr);
 	}
 
 	// top bar
-	cairo_set_source_rgb(cr, bg, bg, bg);
+	gdk_cairo_set_source_rgba(cr, color_bg);
 	cairo_move_to(cr, wv->x, wv->y + HEADER_HEIGHT);
 	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_move_to(cr, wv->x, wv->y + day_begin_yoffset);
 	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_stroke(cr);
+}
+
+void allocate_colors(void) {
+	color_bg = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_header_bg = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_header_divider = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_fg = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_fg_50 = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_current_time_marker = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+	color_current_day = (GdkRGBA *)malloc(sizeof(GdkRGBA));
+}
+
+void init_style(GtkWidget *mainWindow) {
+	GtkStyleContext* sc = gtk_widget_get_style_context(mainWindow);
+	GdkRGBA color;
+	gtk_style_context_get_color(sc, GTK_STATE_FLAG_NORMAL, &color);
+	gboolean is_dark = color.red > 0.5 && color.blue > 0.5 && color.green > 0.5;
+	if (is_dark) {
+		gdk_rgba_parse(color_bg, "#444444");
+		gdk_rgba_parse(color_header_bg, "#333333");
+		gdk_rgba_parse(color_header_divider, "#666666");
+		gdk_rgba_parse(color_fg, "#aaaaaa");
+		gdk_rgba_parse(color_fg_50, "#808080");
+		gdk_rgba_parse(color_current_time_marker, "#ff8f7e");
+		gdk_rgba_parse(color_current_day, "#79a8cc");
+	} else {
+		gdk_rgba_parse(color_bg, "#fafbfc");
+		gdk_rgba_parse(color_header_bg, "#dadada");
+		gdk_rgba_parse(color_header_divider, "#b6b6b6");
+		gdk_rgba_parse(color_fg, "#4d4d4d");
+		gdk_rgba_parse(color_fg_50, "#a6a6a6");
+		gdk_rgba_parse(color_current_time_marker, "#ff0000");
+		gdk_rgba_parse(color_current_day, "#356797");
+	}
 }
 
 static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data)
@@ -506,7 +552,7 @@ static void week_view_notify_date_range_changed(WeekView* wv)
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0, wv->shown_week, wv->current_view.start, wv->current_view.end);
 }
 
-GtkWidget* week_view_new()
+GtkWidget* week_view_new(void)
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
