@@ -21,9 +21,6 @@
 #define FOCAL_TYPE_WEEK_VIEW (week_view_get_type())
 G_DECLARE_FINAL_TYPE(WeekView, week_view, FOCAL, WEEK_VIEW, GtkDrawingArea)
 
-void allocate_colors(void);
-void init_style(GtkWidget *mainWindow);
-
 GtkWidget* week_view_new(void);
 
 void week_view_add_event(WeekView* wv, Event* vevent);

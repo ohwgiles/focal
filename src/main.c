@@ -281,8 +281,6 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 
-	allocate_colors();
-	init_style(fm->mainWindow);
 	fm->weekView = week_view_new();
 	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
 	fm->eventDetail = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
