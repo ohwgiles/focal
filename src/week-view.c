@@ -33,7 +33,7 @@ struct _WeekView {
 	int x, y, width, height;
 	struct {
 		GdkRGBA bg;
-		GdkRGBA bg_header;
+		GdkRGBA bg_title_cells;
 		GdkRGBA fg;
 		GdkRGBA fg_50;
 		GdkRGBA header_divider;
@@ -134,7 +134,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 
 	// bg of hours legend
-	gdk_cairo_set_source_rgba(cr, &wv->colors.bg);
+	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_title_cells);
 	cairo_rectangle(cr, 0, 0, SIDEBAR_WIDTH, wv->height);
 	cairo_fill(cr);
 
@@ -195,7 +195,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	}
 
 	// header bg
-	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_header);
+	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_title_cells);
 	cairo_rectangle(cr, 0, 0, wv->width, day_begin_yoffset);
 	cairo_fill(cr);
 
@@ -461,24 +461,18 @@ static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpoint
 							 wv->height);
 }
 
-static void week_view_init(WeekView* wv)
+static void on_realize(GtkWidget* widget)
 {
-	wv->scroll_pos = 410;
+	WeekView* wv = FOCAL_WEEK_VIEW(widget);
 
-	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
-
-	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
-	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
-	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
-
-	GtkStyleContext* sc = gtk_widget_get_style_context((GtkWidget*) wv);
+	GtkStyleContext* sc = gtk_widget_get_style_context(widget);
 	GdkRGBA color;
 	gtk_style_context_get_color(sc, GTK_STATE_FLAG_NORMAL, &color);
 	// TODO make fully generic: retrieve available colors from style context, calculate inbetween values
 	if (color.red > 0.5 && color.blue > 0.5 && color.green > 0.5) {
 		// dark
 		gdk_rgba_parse(&wv->colors.bg, "#444444");
-		gdk_rgba_parse(&wv->colors.bg_header, "#333333");
+		gdk_rgba_parse(&wv->colors.bg_title_cells, "#333333");
 		gdk_rgba_parse(&wv->colors.header_divider, "#666666");
 		gdk_rgba_parse(&wv->colors.fg, "#aaaaaa");
 		gdk_rgba_parse(&wv->colors.fg_50, "#808080");
@@ -487,13 +481,26 @@ static void week_view_init(WeekView* wv)
 	} else {
 		// light
 		gdk_rgba_parse(&wv->colors.bg, "#fafbfc");
-		gdk_rgba_parse(&wv->colors.bg_header, "#dadada");
+		gdk_rgba_parse(&wv->colors.bg_title_cells, "#dadada");
 		gdk_rgba_parse(&wv->colors.header_divider, "#b6b6b6");
-		gdk_rgba_parse(&wv->colors.fg, "#4d4d4d");
+		gdk_rgba_parse(&wv->colors.fg, "#303030");
 		gdk_rgba_parse(&wv->colors.fg_50, "#a6a6a6");
 		gdk_rgba_parse(&wv->colors.marker_current_time, "#ff0000");
+		// TODO TBD: add bg_current_day(?) to allow e.g. invert or vary fg/bg in current day label cell (not needed in dark display)
 		gdk_rgba_parse(&wv->colors.fg_current_day, "#356797");
 	}
+}
+
+static void week_view_init(WeekView* wv)
+{
+	wv->scroll_pos = 410;
+
+	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
+
+	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
+	g_signal_connect(G_OBJECT(wv), "realize", G_CALLBACK(on_realize), NULL);
+	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
+	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
 
 static void update_current_time(WeekView* wv)
