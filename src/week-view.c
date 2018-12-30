@@ -47,16 +47,16 @@ struct _WeekView {
 	EventWidget* events_allday[7];
 	int shown_week; // 1-based, note libical is 0-based
 	int shown_year;
-	int weekday_start;
+	int weekday_start; // 0-based, note libical is 1-based
 	int weekday_end;
 	icaltimezone* current_tz;
 	icaltime_span current_view;
 	struct {
 		gboolean within_shown_range;
 		int day;
-		int weekday;
+		int weekday; // 0-based, note libical is 1-based
 		int minutes;
-		int week;
+		int week; // 1-based, note libical is 0-based
 		int year;
 	} now;
 };
@@ -133,7 +133,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 
-	// bg of hours legend
+	// bg of hours legend
 	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_title_cells);
 	cairo_rectangle(cr, 0, 0, SIDEBAR_WIDTH, wv->height);
 	cairo_fill(cr);
@@ -479,14 +479,14 @@ static void on_realize(GtkWidget* widget)
 		gdk_rgba_parse(&wv->colors.marker_current_time, "#ff8f7e");
 		gdk_rgba_parse(&wv->colors.fg_current_day, "#79a8cc");
 	} else {
-		// light
+		// light
 		gdk_rgba_parse(&wv->colors.bg, "#fafbfc");
 		gdk_rgba_parse(&wv->colors.bg_title_cells, "#dadada");
 		gdk_rgba_parse(&wv->colors.header_divider, "#b6b6b6");
 		gdk_rgba_parse(&wv->colors.fg, "#303030");
 		gdk_rgba_parse(&wv->colors.fg_50, "#a6a6a6");
 		gdk_rgba_parse(&wv->colors.marker_current_time, "#ff0000");
-		// TODO TBD: add bg_current_day(?) to allow e.g. invert or vary fg/bg in current day label cell (not needed in dark display)
+		// TODO TBD: add bg_current_day(?) to allow e.g. invert or vary fg/bg in current day label cell (not needed in dark display)
 		gdk_rgba_parse(&wv->colors.fg_current_day, "#356797");
 	}
 }
@@ -509,7 +509,7 @@ static void update_current_time(WeekView* wv)
 
 	wv->now.day = today.day;
 	wv->now.minutes = 60 * today.hour + today.minute;
-	wv->now.weekday = icaltime_day_of_week(today);
+	wv->now.weekday = icaltime_day_of_week(today) - ICAL_SUNDAY_WEEKDAY;
 	wv->now.week = icaltime_week_number(today) + 1;
 	wv->now.year = today.year;
 }
@@ -587,7 +587,7 @@ static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurati
 	// exact check
 	icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
 	if (icaltime_span_overlaps(&span, &wv->current_view)) {
-		int dow = icaltime_day_of_week(next) - 1;
+		int dow = icaltime_day_of_week(next) - ICAL_SUNDAY_WEEKDAY;
 		EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 		w->ev = ev;
 		if (next.is_date) {
@@ -619,7 +619,7 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
-	int dow = icaltime_day_of_week(dtstart) - 1;
+	int dow = icaltime_day_of_week(dtstart) - ICAL_SUNDAY_WEEKDAY;
 
 	EventWidget** ll = dtstart.is_date ? &wv->events_allday[dow] : &wv->events_week[dow];
 	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
@@ -739,7 +739,7 @@ void week_view_focus_event(WeekView* wv, Event* event)
 
 	GdkRectangle rect;
 	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->weekday_end - wv->weekday_start + 1);
-	rect.x = (icaltime_day_of_week(dt) - 1) * rect.width + SIDEBAR_WIDTH;
+	rect.x = (icaltime_day_of_week(dt) - ICAL_SUNDAY_WEEKDAY) * rect.width + SIDEBAR_WIDTH;
 	rect.y = HEADER_HEIGHT + (dt.hour * 60 + dt.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
