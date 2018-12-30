@@ -131,7 +131,7 @@ static void stream_read_done(GObject* source, GAsyncResult* res, gpointer user_d
 	long bytes_read = g_input_stream_read_finish(G_INPUT_STREAM(source), res, &err);
 	if (bytes_read < 0) {
 		// error
-		g_critical(err->message);
+		g_critical("%s", err->message);
 		// TODO: cleanup leaks
 		return;
 	}
@@ -160,7 +160,7 @@ static void file_read_done(GObject* source, GAsyncResult* res, gpointer user_dat
 	GError* err = NULL;
 	GFileInputStream* stream = g_file_read_finish(G_FILE(source), res, &err);
 	if (err) {
-		g_critical(err->message);
+		g_critical("%s", err->message);
 		return;
 	}
 

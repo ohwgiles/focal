@@ -31,6 +31,15 @@ typedef struct _EventWidget EventWidget;
 struct _WeekView {
 	GtkDrawingArea drawing_area;
 	int x, y, width, height;
+	struct {
+		GdkRGBA bg;
+		GdkRGBA bg_title_cells;
+		GdkRGBA fg;
+		GdkRGBA fg_50;
+		GdkRGBA header_divider;
+		GdkRGBA marker_current_time;
+		GdkRGBA fg_current_day;
+	} colors;
 	double scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
@@ -43,7 +52,8 @@ struct _WeekView {
 	icaltimezone* current_tz;
 	icaltime_span current_view;
 	struct {
-		gboolean visible;
+		gboolean within_shown_range;
+		int day;
 		int weekday;
 		int minutes;
 		int week;
@@ -113,8 +123,6 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	const int num_days = wv->weekday_end - wv->weekday_start + 1;
 	const double dashes[] = {1.0};
 
-	double dark = 0.3, med = 0.65, light = 0.85;
-	cairo_set_source_rgb(cr, dark, dark, dark);
 	cairo_set_line_width(cr, 1.0);
 
 	const int first_visible_halfhour = wv->scroll_pos / HALFHOUR_HEIGHT;
@@ -125,24 +133,30 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 
+	// bg of hours legend
+	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_title_cells);
+	cairo_rectangle(cr, 0, 0, SIDEBAR_WIDTH, wv->height);
+	cairo_fill(cr);
+
+	// horizontal hour and half-hour divider lines
 	for (int hh = first_visible_halfhour;; ++hh) {
 		double y = wv->y + day_begin_yoffset + hh * HALFHOUR_HEIGHT - (int) wv->scroll_pos;
 		if (y > wv->y + wv->height)
 			break;
 		if (hh % 2 == 0) {
-			cairo_set_source_rgb(cr, med, med, med);
+			gdk_cairo_set_source_rgba(cr, &wv->colors.fg_50);
 			cairo_set_dash(cr, NULL, 0, 0);
 			cairo_move_to(cr, wv->x, y);
 			cairo_rel_line_to(cr, wv->width, 0);
 			cairo_stroke(cr);
 			// draw hour labels
-			char hourlabel[8];
-			cairo_move_to(cr, wv->x + 5, y + 12);
-			sprintf(hourlabel, "%02d", hh / 2);
-			cairo_set_source_rgb(cr, dark, dark, dark);
-			cairo_show_text(cr, hourlabel);
+			char hour_label[8];
+			cairo_move_to(cr, wv->x + 5, y + 13);
+			sprintf(hour_label, "%02d", hh / 2);
+			gdk_cairo_set_source_rgba(cr, &wv->colors.fg);
+			cairo_show_text(cr, hour_label);
 		} else {
-			cairo_set_source_rgb(cr, light, light, light);
+			gdk_cairo_set_source_rgba(cr, &wv->colors.fg);
 			cairo_set_dash(cr, dashes, 1, 0);
 			cairo_move_to(cr, wv->x + SIDEBAR_WIDTH, y);
 			cairo_rel_line_to(cr, wv->width, 0);
@@ -170,17 +184,18 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		}
 	}
 
-	if (wv->now.visible) {
+	// current time indicator line
+	if (wv->now.within_shown_range) {
 		double nowY = wv->y + day_begin_yoffset + wv->now.minutes * HALFHOUR_HEIGHT / 30 - (int) wv->scroll_pos;
-		cairo_set_source_rgb(cr, 1, 0, 0);
+		gdk_cairo_set_source_rgba(cr, &wv->colors.marker_current_time);
 		cairo_set_dash(cr, NULL, 0, 0);
 		cairo_move_to(cr, wv->x + SIDEBAR_WIDTH + (wv->now.weekday - wv->weekday_start) * day_width, nowY);
 		cairo_rel_line_to(cr, day_width, 0);
 		cairo_stroke(cr);
 	}
 
-	// header
-	cairo_set_source_rgb(cr, 1, 1, 1);
+	// header bg
+	gdk_cairo_set_source_rgba(cr, &wv->colors.bg_title_cells);
 	cairo_rectangle(cr, 0, 0, wv->width, day_begin_yoffset);
 	cairo_fill(cr);
 
@@ -196,37 +211,50 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	}
 	g_object_unref(layout);
 
-	// draw vertical lines for days
+	// vertical lines for days
 	cairo_set_dash(cr, NULL, 0, 0);
+
 	icaltimetype day = icaltime_from_timet_with_zone(wv->current_view.start, 1, wv->current_tz);
 	for (int d = 0; d < num_days; ++d, icaltime_adjust(&day, 1, 0, 0, 0)) {
 		double x = wv->x + SIDEBAR_WIDTH + d * day_width;
-		char daylabel[16];
+		char day_label[16];
 		time_t tt = icaltime_as_timet(day);
 		struct tm* t = localtime(&tt);
 
-		strftime(daylabel, 16, "%e", t);
-		cairo_move_to(cr, x + 5, wv->y + HEADER_HEIGHT - 5);
-		cairo_set_font_size(cr, 22);
-		cairo_set_source_rgb(cr, dark, dark, dark);
-		cairo_show_text(cr, daylabel);
+		// day of month
+		strftime(day_label, 16, "%e", t);
+		cairo_move_to(cr, x + 8, wv->y + HEADER_HEIGHT - 14);
+		cairo_set_font_size(cr, 14);
 
-		strftime(daylabel, 16, "%a", t);
+		if (wv->now.within_shown_range && day.day == wv->now.day) {
+			gdk_cairo_set_source_rgba(cr, &wv->colors.fg_current_day);
+		} else {
+			gdk_cairo_set_source_rgba(cr, &wv->colors.fg);
+		}
+		cairo_show_text(cr, day_label);
 
-		for (char* p = daylabel; *p; ++p)
+		// weekday abbreviation
+		strftime(day_label, 16, "%a", t);
+
+		for (char* p = day_label; *p; ++p)
 			*p = toupper(*p);
-		cairo_move_to(cr, x + 35, wv->y + HEADER_HEIGHT - 5);
-		cairo_set_font_size(cr, 11);
-		cairo_show_text(cr, daylabel);
+		cairo_move_to(cr, x + 30, wv->y + HEADER_HEIGHT - 14);
+		cairo_set_font_size(cr, 14);
+		cairo_show_text(cr, day_label);
 
-		cairo_set_source_rgb(cr, med, med, med);
+		gdk_cairo_set_source_rgba(cr, &wv->colors.fg_50);
 		cairo_move_to(cr, x, wv->y + HEADER_HEIGHT);
 		cairo_rel_line_to(cr, 0, wv->height);
+		cairo_stroke(cr);
+
+		gdk_cairo_set_source_rgba(cr, &wv->colors.header_divider);
+		cairo_move_to(cr, x, wv->y);
+		cairo_rel_line_to(cr, 0, HEADER_HEIGHT);
 		cairo_stroke(cr);
 	}
 
 	// top bar
-	cairo_set_source_rgb(cr, dark, dark, dark);
+	gdk_cairo_set_source_rgba(cr, &wv->colors.bg);
 	cairo_move_to(cr, wv->x, wv->y + HEADER_HEIGHT);
 	cairo_rel_line_to(cr, wv->width, 0);
 	cairo_move_to(cr, wv->x, wv->y + day_begin_yoffset);
@@ -433,6 +461,36 @@ static void on_size_allocate(GtkWidget* widget, GdkRectangle* allocation, gpoint
 							 wv->height);
 }
 
+static void on_realize(GtkWidget* widget)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(widget);
+
+	GtkStyleContext* sc = gtk_widget_get_style_context(widget);
+	GdkRGBA color;
+	gtk_style_context_get_color(sc, GTK_STATE_FLAG_NORMAL, &color);
+	// TODO make fully generic: retrieve available colors from style context, calculate inbetween values
+	if (color.red > 0.5 && color.blue > 0.5 && color.green > 0.5) {
+		// dark
+		gdk_rgba_parse(&wv->colors.bg, "#444444");
+		gdk_rgba_parse(&wv->colors.bg_title_cells, "#333333");
+		gdk_rgba_parse(&wv->colors.header_divider, "#666666");
+		gdk_rgba_parse(&wv->colors.fg, "#aaaaaa");
+		gdk_rgba_parse(&wv->colors.fg_50, "#808080");
+		gdk_rgba_parse(&wv->colors.marker_current_time, "#ff8f7e");
+		gdk_rgba_parse(&wv->colors.fg_current_day, "#79a8cc");
+	} else {
+		// light
+		gdk_rgba_parse(&wv->colors.bg, "#fafbfc");
+		gdk_rgba_parse(&wv->colors.bg_title_cells, "#dadada");
+		gdk_rgba_parse(&wv->colors.header_divider, "#b6b6b6");
+		gdk_rgba_parse(&wv->colors.fg, "#303030");
+		gdk_rgba_parse(&wv->colors.fg_50, "#a6a6a6");
+		gdk_rgba_parse(&wv->colors.marker_current_time, "#ff0000");
+		// TODO TBD: add bg_current_day(?) to allow e.g. invert or vary fg/bg in current day label cell (not needed in dark display)
+		gdk_rgba_parse(&wv->colors.fg_current_day, "#356797");
+	}
+}
+
 static void week_view_init(WeekView* wv)
 {
 	wv->scroll_pos = 410;
@@ -440,6 +498,7 @@ static void week_view_init(WeekView* wv)
 	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
 
 	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
+	g_signal_connect(G_OBJECT(wv), "realize", G_CALLBACK(on_realize), NULL);
 	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
@@ -448,6 +507,7 @@ static void update_current_time(WeekView* wv)
 {
 	struct icaltimetype today = icaltime_current_time_with_zone(wv->current_tz);
 
+	wv->now.day = today.day;
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today);
 	wv->now.week = icaltime_week_number(today) + 1;
@@ -488,7 +548,7 @@ static void week_view_notify_date_range_changed(WeekView* wv)
 	g_signal_emit(wv, week_view_signals[SIGNAL_DATE_RANGE_CHANGED], 0, wv->shown_week, wv->current_view.start, wv->current_view.end);
 }
 
-GtkWidget* week_view_new()
+GtkWidget* week_view_new(void)
 {
 	WeekView* cw = g_object_new(FOCAL_TYPE_WEEK_VIEW, NULL);
 
@@ -503,7 +563,7 @@ GtkWidget* week_view_new()
 	cw->shown_year = cw->now.year;
 	update_view_span(cw);
 
-	cw->now.visible = TRUE;
+	cw->now.within_shown_range = TRUE;
 	g_timeout_add_seconds(120, &timer_update_current_time, cw);
 
 	return (GtkWidget*) cw;
@@ -606,7 +666,7 @@ static void week_view_populate_view(WeekView* wv)
 
 	time_t now = time(NULL);
 	icaltime_span icalnow = {now, now, FALSE};
-	wv->now.visible = icaltime_span_contains(&icalnow, &wv->current_view);
+	wv->now.within_shown_range = icaltime_span_contains(&icalnow, &wv->current_view);
 
 	for (GSList* p = wv->calendars; p; p = p->next)
 		calendar_each_event(FOCAL_CALENDAR(p->data), add_event_from_calendar, wv);
