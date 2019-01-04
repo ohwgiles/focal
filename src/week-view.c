@@ -43,6 +43,8 @@ struct _WeekView {
 	double scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
+	// index 0 represents the first column in the week view, which
+	// may be sunday or monday depending on preferences
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
 	int shown_week; // 1-based, note libical is 0-based
@@ -174,7 +176,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 
 	// draw events
 	for (int d = 0; d < num_days; ++d) {
-		for (EventWidget* tmp = wv->events_week[d + wv->weekday_start]; tmp; tmp = tmp->next) {
+		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
 			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
 			draw_event(cr, tmp->ev, layout,
 					   wv->x + SIDEBAR_WIDTH + d * day_width,
@@ -589,7 +591,7 @@ static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurati
 	// exact check
 	icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
 	if (icaltime_span_overlaps(&span, &wv->current_view)) {
-		int dow = icaltime_day_of_week(next) - ICAL_SUNDAY_WEEKDAY;
+		int dow = icaltime_day_of_week(next) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start;
 		EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
 		w->ev = ev;
 		if (next.is_date) {
@@ -621,7 +623,7 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
-	int dow = icaltime_day_of_week(dtstart) - ICAL_SUNDAY_WEEKDAY;
+	int dow = icaltime_day_of_week(dtstart) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start;
 
 	EventWidget** ll = dtstart.is_date ? &wv->events_allday[dow] : &wv->events_week[dow];
 	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
@@ -741,7 +743,7 @@ void week_view_focus_event(WeekView* wv, Event* event)
 
 	GdkRectangle rect;
 	rect.width = (wv->width - SIDEBAR_WIDTH) / (wv->weekday_end - wv->weekday_start + 1);
-	rect.x = (icaltime_day_of_week(dt) - ICAL_SUNDAY_WEEKDAY) * rect.width + SIDEBAR_WIDTH;
+	rect.x = (icaltime_day_of_week(dt) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start) * rect.width + SIDEBAR_WIDTH;
 	rect.y = HEADER_HEIGHT + (dt.hour * 60 + dt.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 	rect.height = (et.hour * 60 + et.minute - dt.hour * 60 - dt.minute) * HALFHOUR_HEIGHT / 30;
 	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, event, &rect);
