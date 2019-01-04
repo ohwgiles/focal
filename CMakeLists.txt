@@ -55,6 +55,7 @@ add_executable(${PROJECT_NAME}
 	src/oauth2-provider-google.c
 	src/oauth2-provider-outlook.c
 	src/outlook-calendar.c
+	src/reminder.c
 	src/remote-auth-basic.c
 	src/remote-auth.c
 	src/remote-auth-oauth2.c

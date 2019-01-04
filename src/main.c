@@ -17,6 +17,7 @@
 #include "calendar-config.h"
 #include "event-panel.h"
 #include "event-popup.h"
+#include "reminder.h"
 #include "week-view.h"
 
 #include <curl/curl.h>
@@ -147,6 +148,8 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 	// The popover might be up and holding a reference to a just-invalidated event
 	gtk_widget_hide(fm->popover);
+
+	reminder_sync_notifications(fm->calendars);
 }
 
 static void calendar_config_modified(FocalApp* fm, Calendar* cal)
@@ -378,6 +381,7 @@ static void focal_startup(GApplication* app)
 	g_random_set_seed(time(NULL) * getpid());
 
 	async_curl_init();
+	reminder_init();
 
 	FocalApp* fm = FOCAL_APP(app);
 
@@ -407,6 +411,7 @@ static void focal_shutdown(GApplication* app)
 	g_free(fm->path_accounts);
 	g_free(fm->path_prefs);
 	async_curl_cleanup();
+	reminder_cleanup();
 }
 
 static gint focal_cmdline(GApplication* application, GApplicationCommandLine* command_line)

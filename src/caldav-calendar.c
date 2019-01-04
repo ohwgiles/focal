@@ -243,6 +243,7 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		}
 
 		// "officially" append the event to the collection
+		// TODO: event_replace_component?
 		if (ac->old_event)
 			ac->cal->events = g_slist_remove(ac->cal->events, ac->old_event);
 		if (ac->new_event)
