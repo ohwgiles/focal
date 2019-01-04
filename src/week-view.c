@@ -525,14 +525,16 @@ static gboolean timer_update_current_time(gpointer user_data)
 void update_view_span(WeekView* wv)
 {
 	// based on algorithm from https://en.wikipedia.org/wiki/ISO_week_date
-	int wd_4jan = icaltime_day_of_week(icaltime_from_day_of_year(4, wv->shown_year));
+	int span_year_begin = wv->shown_year;
+	int wd_4jan = icaltime_day_of_week(icaltime_from_day_of_year(4, span_year_begin));
 	int tmp = wv->shown_week * 7 + wv->weekday_start - (wd_4jan + 2); // First day of week
 	if (tmp < 1) {
-		tmp += icaltime_days_in_year(--wv->shown_year);
+		tmp += icaltime_days_in_year(--span_year_begin);
 	} else if (tmp > icaltime_days_in_year(wv->shown_year)) {
-		tmp -= icaltime_days_in_year(wv->shown_year++);
+		// Should be impossible to arrive here?
+		tmp -= icaltime_days_in_year(span_year_begin++);
 	}
-	icaltimetype start = icaltime_from_day_of_year(tmp, wv->shown_year);
+	icaltimetype start = icaltime_from_day_of_year(tmp, span_year_begin);
 	start.hour = 0;
 	start.minute = 0;
 	start.second = 0;
