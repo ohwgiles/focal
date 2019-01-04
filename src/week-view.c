@@ -687,7 +687,7 @@ void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 void week_view_goto_previous(WeekView* wv)
 {
 	if (--wv->shown_week == 0)
-		wv->shown_week = weeks_in_year(--wv->shown_year) - 1;
+		wv->shown_week = weeks_in_year(--wv->shown_year);
 	week_view_populate_view(wv);
 	week_view_notify_date_range_changed(wv);
 }
