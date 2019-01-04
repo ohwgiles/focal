@@ -14,6 +14,9 @@
 #include "reminder.h"
 #include "calendar.h"
 
+#include <stdlib.h>
+#include <string.h>
+
 static const icaltimezone* current_tz;
 static icaltimetype now;
 static icaltime_span notify_range;
@@ -88,7 +91,7 @@ static void check_occurrence_add_notification(Event* ev, icaltimetype next, stru
 			time_t alarm = icaltime_as_timet_with_zone(event_get_alarm_time(ev), current_tz);
 			time_t now = time(NULL); // TODO avoid call for each event/ocurrence?
 			if (alarm > now)
-				rem->source_id = g_timeout_add_seconds(alarm - now, G_SOURCE_FUNC(reminder_display), rem);
+				rem->source_id = g_timeout_add_seconds(alarm - now, (GSourceFunc) reminder_display, rem);
 			else
 				rem->seen = TRUE;
 			g_hash_table_insert(reminders, ev, rem);
