@@ -290,6 +290,10 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	// todo: better separation of ui from calendar models?
 	create_calendars(fm);
+	// We don't actually have to add the calendar to the week view here (it probably hasn't synced yet)
+	// But this will allow week_view_goto_current to call calendar_load_additional_for_date_range
+	for (GSList* p = fm->calendars; p; p = p->next)
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), FOCAL_CALENDAR(p->data));
 
 	const GActionEntry entries[] = {
 		{"accounts", open_accounts_dialog},

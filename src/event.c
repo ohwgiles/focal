@@ -262,30 +262,36 @@ void event_remove_attendee(Event* ev, icalproperty* attendee)
 	ev->dirty = TRUE;
 }
 
-void event_each_recurrence(Event* ev, const icaltimezone* user_tz, EventRecurrenceCallback callback, gpointer user)
+typedef struct {
+	Event* ev;
+	struct icaldurationtype duration; // cache
+	gboolean all_day;				  // cache
+	const icaltimezone* user_tz;
+	EventRecurrenceCallback callback;
+	gpointer user_data;
+} EventRecurrenceContext;
+
+void event_each_recurrence_marshaller(icalcomponent* comp, struct icaltime_span* span, void* data)
 {
-	icaltimetype dtstart = event_get_dtstart(ev);
-	//icaltimetype dtend = event_get_dtend(ev);
-	const icaltimezone* tz = icaltime_get_timezone(dtstart);
-	// convert to local time
-	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, (icaltimezone*) user_tz);
+	EventRecurrenceContext* ctx = (EventRecurrenceContext*) data;
+	ctx->callback(ctx->ev, icaltime_from_timet_with_zone(span->start, ctx->all_day, ctx->user_tz), ctx->duration, ctx->user_data);
+}
 
-	struct icaldurationtype duration = event_get_duration(ev);
+void event_each_recurrence(Event* ev, const icaltimezone* user_tz, icaltime_span range, EventRecurrenceCallback callback, gpointer user)
+{
+	EventRecurrenceContext ctx;
+	ctx.ev = ev;
+	ctx.duration = event_get_duration(ev);
+	ctx.all_day = event_get_dtstart(ev).is_date;
+	ctx.user_tz = user_tz;
+	ctx.callback = callback;
+	ctx.user_data = user;
+	icalcomponent_foreach_recurrence(ev->cmp, icaltime_from_timet_with_zone(range.start, 0, user_tz), icaltime_from_timet_with_zone(range.end, 0, user_tz), event_each_recurrence_marshaller, &ctx);
+}
 
-	icalproperty* rrule = icalcomponent_get_first_property(ev->cmp, ICAL_RRULE_PROPERTY);
-	if (rrule) {
-		// recurring event
-		struct icalrecurrencetype recur = icalproperty_get_rrule(rrule);
-		icalrecur_iterator* ritr = icalrecur_iterator_new(recur, dtstart);
-		icaltimetype next;
-		while (next = icalrecur_iterator_next(ritr), !icaltime_is_null_time(next)) {
-			(*callback)(ev, next, duration, user);
-		}
-		icalrecur_iterator_free(ritr);
-	} else {
-		// non-recurring event
-		(*callback)(ev, dtstart, duration, user);
-	}
+gboolean event_is_recurring(Event* ev)
+{
+	return icalcomponent_get_first_property(ev->cmp, ICAL_RRULE_PROPERTY) != NULL;
 }
 
 static char* icalparser_read_fstream(char* s, size_t sz, void* ud)

@@ -78,7 +78,8 @@ void event_remove_attendee(Event* ev, icalproperty* attendee);
 // adjusted to the local timezone passed as tz.
 // TODO: is this intuitive? What's wrong with passing the original dtstart?
 typedef void (*EventRecurrenceCallback)(Event* event, icaltimetype dtstart, struct icaldurationtype duration, gpointer user);
-void event_each_recurrence(Event* ev, const icaltimezone* tz, EventRecurrenceCallback callback, gpointer user);
+void event_each_recurrence(Event* ev, const icaltimezone* tz, icaltime_span range, EventRecurrenceCallback callback, gpointer user);
+gboolean event_is_recurring(Event* ev);
 
 // Creates a new Event object by reading the contents of the file at the
 // given path. Returns NULL if the file could not be read or parsed.

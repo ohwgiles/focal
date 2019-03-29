@@ -68,40 +68,35 @@ static void check_occurrence_add_notification(Event* ev, icaltimetype next, stru
 	if (next.is_date)
 		return;
 
-	// crude faster filter
-	// TODO what about notifications for events near the boundary?
-	if (!(next.year == now.year && next.month == now.month))
-		return;
-
-	// exact check
 	time_t at = icaltime_as_timet(next);
-	if (notify_range.start < at && at < notify_range.end) {
-		Reminder* rem = (Reminder*) g_hash_table_lookup(reminders, ev);
-		if (rem) {
-			if (rem->at != at)
-				g_warning("%s", "Limited support for notifications for closely recurring events");
-			rem->known = TRUE;
-		} else {
-			rem = g_new0(Reminder, 1);
-			rem->known = TRUE;
-			rem->seen = FALSE;
-			rem->at = at;
-			rem->event = ev;
-			g_object_weak_ref(G_OBJECT(ev), event_deleted, rem);
-			time_t alarm = icaltime_as_timet_with_zone(event_get_alarm_time(ev), current_tz);
-			time_t now = time(NULL); // TODO avoid call for each event/ocurrence?
-			if (alarm > now)
-				rem->source_id = g_timeout_add_seconds(alarm - now, (GSourceFunc) reminder_display, rem);
-			else
-				rem->seen = TRUE;
-			g_hash_table_insert(reminders, ev, rem);
-		}
+	// TODO remove? This should be guaranteed by event_each_recurrence
+	g_assert_true(notify_range.start < at && at < notify_range.end);
+
+	Reminder* rem = (Reminder*) g_hash_table_lookup(reminders, ev);
+	if (rem) {
+		if (rem->at != at)
+			g_warning("%s", "Limited support for notifications for closely recurring events");
+		rem->known = TRUE;
+	} else {
+		rem = g_new0(Reminder, 1);
+		rem->known = TRUE;
+		rem->seen = FALSE;
+		rem->at = at;
+		rem->event = ev;
+		g_object_weak_ref(G_OBJECT(ev), event_deleted, rem);
+		time_t alarm = icaltime_as_timet_with_zone(event_get_alarm_time(ev), current_tz);
+		time_t now = time(NULL); // TODO avoid call for each event/ocurrence?
+		if (alarm > now)
+			rem->source_id = g_timeout_add_seconds(alarm - now, (GSourceFunc) reminder_display, rem);
+		else
+			rem->seen = TRUE;
+		g_hash_table_insert(reminders, ev, rem);
 	}
 }
 
 static void check_event_add_notification(gpointer user_data, Event* ev)
 {
-	event_each_recurrence(ev, current_tz, check_occurrence_add_notification, user_data);
+	event_each_recurrence(ev, current_tz, notify_range, check_occurrence_add_notification, user_data);
 }
 
 static void update_current_time()

@@ -744,6 +744,7 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
 	FOCAL_CALENDAR_CLASS(klass)->read_only = caldav_is_read_only;
+	FOCAL_CALENDAR_CLASS(klass)->load_additional_for_date_range = NULL;
 
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->constructed = constructed;

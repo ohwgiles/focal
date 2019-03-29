@@ -43,8 +43,9 @@ struct _WeekView {
 	double scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
-	// index 0 represents the first column in the week view, which
-	// may be sunday or monday depending on preferences
+	// Array index represents column in week view, which might be Sunday
+	// or Monday. Use the dayindex typedef and dayindex_from_icaltime
+	// function to avoid mistakes
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
 	int shown_week; // 1-based, note libical is 0-based
@@ -62,6 +63,11 @@ struct _WeekView {
 		int year;
 	} now;
 };
+
+// Documentative typedef representing an index into WeekView.events_week.
+// It represents a column in the week view, which may be Sunday or Monday
+// depending on user preferences.
+typedef int dayindex;
 
 enum {
 	SIGNAL_EVENT_SELECTED,
@@ -103,6 +109,17 @@ G_DEFINE_TYPE_WITH_CODE(WeekView, week_view, GTK_TYPE_DRAWING_AREA, G_IMPLEMENT_
 
 #define SIDEBAR_WIDTH 25.5
 #define HALFHOUR_HEIGHT 30.0
+
+static dayindex dayindex_from_icaltime(WeekView* wv, icaltimetype dt)
+{
+	// icaltime_day_of_week is 1-based, wv->weekday_start is 0-based, but both "start" on Sunday.
+	// So if the user configures Monday as the first day of the week, a simple subtraction
+	//   icaltime_day_of_week(dt) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start
+	// will yield an incorrect (negative) result
+	int ical_dow = icaltime_day_of_week(dt);
+	g_assert_true(ical_dow >= ICAL_SUNDAY_WEEKDAY && ical_dow <= ICAL_SATURDAY_WEEKDAY);
+	return (ical_dow - ICAL_SUNDAY_WEEKDAY - wv->weekday_start + 7) % 7;
+}
 
 static void draw_event(cairo_t* cr, Event* tmp, PangoLayout* layout, double x, double y, int width, int height)
 {
@@ -282,7 +299,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 
 	// look for collisions
 	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
-	const int dow = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
+	const dayindex di = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
 	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
 	const gboolean all_day = event->y < day_begin_yoffset;
 	const int minutesAt = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
@@ -290,17 +307,17 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 	EventWidget* ew = NULL;
 	GdkRectangle rect;
 	rect.width = (wv->width - SIDEBAR_WIDTH) / num_days;
-	rect.x = dow * rect.width + SIDEBAR_WIDTH;
+	rect.x = di * rect.width + SIDEBAR_WIDTH;
 
 	if (all_day) {
-		if (wv->events_allday[dow])
-			ew = wv->events_allday[dow];
+		if (wv->events_allday[di])
+			ew = wv->events_allday[di];
 
 		rect.y = HEADER_HEIGHT;
 		rect.height = ALLDAY_HEIGHT;
 	} else {
 		// regular events
-		for (ew = wv->events_week[dow]; ew; ew = ew->next) {
+		for (ew = wv->events_week[di]; ew; ew = ew->next) {
 			if (ew->minutes_from < minutesAt && minutesAt < ew->minutes_to) {
 				break;
 			}
@@ -321,7 +338,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			return TRUE;
 		}
 
-		time_t at = wv->current_view.start + dow * 24 * 3600;
+		time_t at = wv->current_view.start + di * 24 * 3600;
 		icaltimetype dtstart, dtend;
 
 		if (all_day) {
@@ -583,32 +600,23 @@ static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurati
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(user);
 
-	// crude faster filter
-	// TODO what if the week overlaps a year boundary?
-	if (next.year < wv->shown_year || next.year > wv->shown_year)
-		return;
-
-	// exact check
-	icaltime_span span = icaltime_span_new(next, icaltime_add(next, duration), 0);
-	if (icaltime_span_overlaps(&span, &wv->current_view)) {
-		int dow = icaltime_day_of_week(next) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start;
-		EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
-		w->ev = ev;
-		if (next.is_date) {
-			w->next = wv->events_allday[dow];
-			wv->events_allday[dow] = w;
-		} else {
-			event_widget_set_extents(w, next, duration);
-			w->next = wv->events_week[dow];
-			wv->events_week[dow] = w;
-		}
+	dayindex di = dayindex_from_icaltime(wv, next);
+	EventWidget* w = (EventWidget*) malloc(sizeof(EventWidget));
+	w->ev = ev;
+	if (next.is_date) {
+		w->next = wv->events_allday[di];
+		wv->events_allday[di] = w;
+	} else {
+		event_widget_set_extents(w, next, duration);
+		w->next = wv->events_week[di];
+		wv->events_week[di] = w;
 	}
 }
 
 static void add_event_from_calendar(gpointer user_data, Event* ev)
 {
 	WeekView* cw = FOCAL_WEEK_VIEW(user_data);
-	event_each_recurrence(ev, cw->current_tz, add_event_occurrence, cw);
+	event_each_recurrence(ev, cw->current_tz, cw->current_view, add_event_occurrence, cw);
 }
 
 void week_view_add_event(WeekView* wv, Event* vevent)
@@ -623,9 +631,9 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	const icaltimezone* tz = icaltime_get_timezone(dtstart);
 	// convert to local time
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
-	int dow = icaltime_day_of_week(dtstart) - ICAL_SUNDAY_WEEKDAY - wv->weekday_start;
+	dayindex di = dayindex_from_icaltime(wv, dtstart);
 
-	EventWidget** ll = dtstart.is_date ? &wv->events_allday[dow] : &wv->events_week[dow];
+	EventWidget** ll = dtstart.is_date ? &wv->events_allday[di] : &wv->events_week[di];
 	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
 		if ((*ew)->ev == ev) {
 			EventWidget* next = (*ew)->next;
@@ -689,6 +697,8 @@ void week_view_goto_previous(WeekView* wv)
 	if (--wv->shown_week == 0)
 		wv->shown_week = weeks_in_year(--wv->shown_year);
 	week_view_populate_view(wv);
+	for (GSList* p = wv->calendars; p; p = p->next)
+		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 
@@ -697,6 +707,8 @@ void week_view_goto_current(WeekView* wv)
 	wv->shown_week = wv->now.week;
 	wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
+	for (GSList* p = wv->calendars; p; p = p->next)
+		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 
@@ -706,6 +718,8 @@ void week_view_goto_next(WeekView* wv)
 	if (wv->shown_week == 1)
 		wv->shown_year++;
 	week_view_populate_view(wv);
+	for (GSList* p = wv->calendars; p; p = p->next)
+		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 

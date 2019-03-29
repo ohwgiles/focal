@@ -28,6 +28,9 @@ struct _OutlookCalendar {
 	RemoteAuth* ba;
 	gchar* tz;
 	gchar* prefer_tz;
+	icaltimezone* ical_tz;
+	gboolean initial_sync;
+	icaltime_span last_view_range;
 };
 
 G_DEFINE_TYPE(OutlookCalendar, outlook_calendar, TYPE_CALENDAR)
@@ -86,12 +89,30 @@ static void delete_event(Calendar* c, Event* event)
 	remote_auth_new_request(oc->ba, do_delete_event, oc, event);
 }
 
-struct icaltimetype icaltime_from_outlook_datetime(const char* str)
+struct icaltimetype icaltime_from_outlook_json(JsonReader* reader)
 {
 	struct icaltimetype r = {0};
+
+	json_reader_read_member(reader, "DateTime");
+	const char* str = json_reader_get_string_value(reader);
 	// 2018-08-28T19:00:00.0000000
 	sscanf(str, "%d-%d-%dT%d:%d:%d", &r.year, &r.month, &r.day, &r.hour, &r.minute, &r.second);
+	json_reader_end_member(reader);
+	json_reader_read_member(reader, "TimeZone");
+	r.zone = icaltimezone_get_builtin_timezone(json_reader_get_string_value(reader));
+	json_reader_end_member(reader);
+
 	return r;
+}
+
+time_t time_t_from_outlook_datetime(const char* str)
+{
+	struct tm t = {0};
+	// 2018-08-28T19:00:00.0000000
+	sscanf(str, "%d-%d-%dT%d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour, &t.tm_min, &t.tm_sec);
+	t.tm_year -= 1900;
+	t.tm_mon -= 1;
+	return timegm(&t);
 }
 
 static void populate_event_from_json(Event* e, JsonReader* reader)
@@ -107,6 +128,7 @@ static void populate_event_from_json(Event* e, JsonReader* reader)
 	json_reader_read_member(reader, "Subject");
 	icalcomponent_set_summary(event, json_reader_get_string_value(reader));
 	json_reader_end_member(reader);
+
 	// Body -> Description
 	json_reader_read_member(reader, "Body");
 	json_reader_read_member(reader, "Content");
@@ -115,20 +137,16 @@ static void populate_event_from_json(Event* e, JsonReader* reader)
 	json_reader_end_member(reader);
 	// Start -> DTSTART
 	json_reader_read_member(reader, "Start");
-	json_reader_read_member(reader, "DateTime");
-	icalcomponent_set_dtstart(event, icaltime_from_outlook_datetime(json_reader_get_string_value(reader)));
-	json_reader_end_member(reader);
+	icalcomponent_set_dtstart(event, icaltime_from_outlook_json(reader));
 	json_reader_end_member(reader);
 	// End -> DTEND
 	json_reader_read_member(reader, "End");
-	json_reader_read_member(reader, "DateTime");
-	icalcomponent_set_dtend(event, icaltime_from_outlook_datetime(json_reader_get_string_value(reader)));
-	json_reader_end_member(reader);
+	icalcomponent_set_dtend(event, icaltime_from_outlook_json(reader));
 	json_reader_end_member(reader);
 
 	json_reader_read_member(reader, "Recurrence");
 	if (json_reader_is_object(reader)) {
-		struct icalrecurrencetype r;
+		struct icalrecurrencetype r = {0};
 		icalrecurrencetype_clear(&r);
 		json_reader_read_member(reader, "Pattern");
 		json_reader_read_member(reader, "Interval");
@@ -214,8 +232,6 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 
 static void do_outlook_add_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event)
 {
-	printf("in do_outlook_add_event\n");
-
 	JsonBuilder* builder = json_builder_new();
 
 	//{
@@ -380,7 +396,14 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	g_string_free(sc->sync_resp, TRUE);
 	g_free(sc);
 
-	g_signal_emit_by_name(oc, "sync-done", 0);
+	if (oc->last_view_range.start) {
+		// now fill out the missing recurrence information for the last requested range.
+		// sync-done will be emitted when complete
+		oc->initial_sync = TRUE;
+		calendar_load_additional_for_date_range(FOCAL_CALENDAR(oc), oc->last_view_range);
+	} else {
+		g_signal_emit_by_name(oc, "sync-done", 0);
+	}
 }
 
 static void do_outlook_sync(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers)
@@ -411,6 +434,186 @@ static gboolean outlook_is_read_only(Calendar* c)
 	return FALSE;
 }
 
+typedef struct {
+	OutlookCalendar* oc;
+	icaltime_span range;
+	gchar* range_string;
+	int num_reqs_remaining;
+	CURL* curl;
+	struct curl_slist* headers;
+} LoadOccurrencesContext;
+
+typedef struct {
+	LoadOccurrencesContext* load_ctx;
+	GString* resp;
+	Event* event;
+	gchar* url;
+} LoadSingleOccurrenceContext;
+
+static void add_unexpected_recurrence(gpointer key, gpointer value, gpointer user_data)
+{
+	icalcomponent* cmp = (icalcomponent*) user_data;
+	struct icaldatetimeperiodtype at = {
+		.time = icaltime_from_timet_with_zone((time_t) key, 0, NULL)};
+	icalcomponent_add_property(cmp, icalproperty_new_rdate(at));
+}
+
+static void on_recurrence_response(CURL* curl, CURLcode ret, void* user)
+{
+	LoadSingleOccurrenceContext* soc = (LoadSingleOccurrenceContext*) user;
+	long response_code;
+	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+	if (response_code == 401) {
+		// In other circumstances we would get a new auth token and try the request again. In this case,
+		// we might have a very large number of asynchronous requests in parallel which would all fail
+		// the same way. Requesting a new auth token in each of them would be a quick way to get blocked
+		// from the API, so don't even try.
+		// Unfortunately, this is not an unreasonable branch to land in - if the auth token expires while
+		// a view is open, and the user navigates to a new week, we will end up here. A future improvement
+		// might be to fetch just the first recurring event (acquiring a new auth token if necessary), and
+		// once successful fire off requests for all the others.
+		g_warning("401 Unauthorized. Not attempting auth token refresh, view may be inconsistent!");
+		goto on_recurrence_response_cleanup;
+	} else if (response_code != 200) {
+		g_critical("unexpected response code %ld", response_code);
+	}
+
+	// debug
+	// printf("response: %.*s\n", (int) soc->resp->len, soc->resp->str);
+
+	JsonParser* parser = json_parser_new();
+	json_parser_load_from_data(parser, soc->resp->str, soc->resp->len, NULL);
+	JsonReader* reader = json_reader_new(json_parser_get_root(parser));
+
+	GHashTable* recurrences_in_range = g_hash_table_new(g_direct_hash, g_direct_equal);
+	json_reader_read_member(reader, "value");
+	for (int i = 0, n = json_reader_count_elements(reader); i < n; ++i) {
+		json_reader_read_element(reader, i);
+		json_reader_read_member(reader, "Start");
+		json_reader_read_member(reader, "DateTime");
+		time_t at = time_t_from_outlook_datetime(json_reader_get_string_value(reader));
+
+		g_hash_table_add(recurrences_in_range, GINT_TO_POINTER(at));
+		json_reader_end_member(reader);
+		json_reader_end_member(reader);
+		json_reader_end_element(reader);
+	}
+	json_reader_end_member(reader);
+	g_object_unref(reader);
+	g_object_unref(parser);
+
+	icalcomponent* cmp = event_get_component(soc->event);
+	icalproperty* rrule = icalcomponent_get_first_property(cmp, ICAL_RRULE_PROPERTY);
+	icaltimetype dtstart = icalcomponent_get_dtstart(cmp);
+	icaltimetype dtfrom = icaltime_from_timet_with_zone(soc->load_ctx->range.start, 0, NULL);
+	icaltimetype dtuntil = icaltime_from_timet_with_zone(soc->load_ctx->range.end, 0, NULL);
+	struct icalrecurrencetype recur = icalproperty_get_rrule(rrule);
+	icalrecur_iterator* ritr = icalrecur_iterator_new(recur, dtstart);
+	icaltimetype next;
+	// TODO: optimize
+	do
+		next = icalrecur_iterator_next(ritr);
+	while (icaltime_compare(next, dtfrom) == -1);
+	while (!icaltime_is_null_time(next) && icaltime_compare(next, dtuntil) == -1) {
+		time_t at = icaltime_as_timet_with_zone(next, next.zone);
+
+		if (g_hash_table_contains(recurrences_in_range, GINT_TO_POINTER(at))) {
+			g_hash_table_remove(recurrences_in_range, GINT_TO_POINTER(at));
+			//printf("debug: [%s] known occurrence at %s\n", icalcomponent_get_summary(cmp), icaltime_as_ical_string(next));
+		} else if (!icalproperty_recurrence_is_excluded(cmp, &dtstart, &next)) {
+			// this occurrence should not exist, and we didn't already know that
+			//printf("debug: [%s] adding exclusion at %s\n", icalcomponent_get_summary(cmp), icaltime_as_ical_string(next));
+			icalcomponent_add_property(cmp, icalproperty_new_exdate(next));
+		}
+		next = icalrecur_iterator_next(ritr);
+	}
+	icalrecur_iterator_free(ritr);
+	// everything remaining in recurrences_in_range should be additional ocurrences of this event
+	g_hash_table_foreach(recurrences_in_range, add_unexpected_recurrence, cmp);
+	g_hash_table_destroy(recurrences_in_range);
+
+on_recurrence_response_cleanup:
+	g_free(soc->url);
+	g_string_free(soc->resp, TRUE);
+
+	if (--soc->load_ctx->num_reqs_remaining == 0) {
+		//printf("debug: all recurrence requests finished\n");
+		// Finished retrieving all extra recurrence info. Clean up the parent structure and
+		// emit sync-done so that the view will be updated
+		LoadOccurrencesContext* loc = soc->load_ctx;
+		// CURL handle was never used (only clones of it), so we have to clean it ourselves
+		curl_slist_free_all(loc->headers);
+		curl_easy_cleanup(loc->curl);
+
+		g_free(loc->range_string);
+
+		g_signal_emit_by_name(loc->oc, "sync-done", 0);
+		g_free(loc);
+	}
+
+	g_free(soc);
+}
+
+static void do_request_recurrences(void* user, Event* event)
+{
+	LoadOccurrencesContext* loc = (LoadOccurrencesContext*) user;
+	if (event_is_recurring(event)) {
+		loc->num_reqs_remaining++;
+
+		LoadSingleOccurrenceContext* soc = g_new0(LoadSingleOccurrenceContext, 1);
+		soc->load_ctx = loc;
+		soc->event = event;
+		soc->resp = g_string_new(NULL);
+		CURL* curl = curl_easy_duphandle(loc->curl);
+		soc->url = g_strdup_printf("https://outlook.office.com/api/v2.0/me/events/%s/instances?%s", event_get_url(event), soc->load_ctx->range_string);
+
+		struct curl_slist* headers = NULL;
+		for (struct curl_slist* it = loc->headers; it; it = it->next)
+			headers = curl_slist_append(headers, it->data);
+		curl_easy_setopt(curl, CURLOPT_URL, soc->url);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, soc->resp);
+		curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_write_to_gstring);
+
+		async_curl_add_request(curl, headers, on_recurrence_response, soc);
+	}
+}
+
+static void request_event_recurrences(LoadOccurrencesContext* loc, CURL* curl, struct curl_slist* headers)
+{
+	headers = curl_slist_append(headers, "client-request-id: abcd1234");
+	headers = curl_slist_append(headers, "return-client-request-id: true");
+	headers = curl_slist_append(headers, "Prefer: outlook.body-content-type=\"text\"");
+
+	// remote_auth_new_request just gives us a single CURL handle. Store it, then
+	// clone it for each request, so they can be executed in parallel.
+	loc->curl = curl;
+	loc->headers = headers;
+
+	each_event(FOCAL_CALENDAR(loc->oc), do_request_recurrences, loc);
+}
+
+static void outlook_load_additional_for_date_range(Calendar* c, icaltime_span range)
+{
+	OutlookCalendar* oc = FOCAL_OUTLOOK_CALENDAR(c);
+	oc->last_view_range = range;
+	if (!oc->initial_sync) {
+		// If we haven't synced yet, there's no sense in fetching recurrence information.
+		// Recurrence information will be fetched after sync.
+		return;
+	}
+	LoadOccurrencesContext* loc = g_new0(LoadOccurrencesContext, 1);
+	loc->oc = oc;
+	loc->range = range;
+	char buf_from[32], buf_to[32];
+	struct tm tm_from, tm_to;
+	localtime_r(&range.start, &tm_from);
+	localtime_r(&range.end, &tm_to);
+	strftime(buf_from, 24, "%FT00:00:00", &tm_from);
+	strftime(buf_to, 24, "%FT00:00:00", &tm_to);
+	loc->range_string = g_strdup_printf("startDateTime=%s&endDateTime=%s", buf_from, buf_to);
+	remote_auth_new_request(loc->oc->ba, request_event_recurrences, loc, NULL);
+}
+
 static void finalize(GObject* gobject)
 {
 	OutlookCalendar* oc = FOCAL_OUTLOOK_CALENDAR(gobject);
@@ -437,6 +640,7 @@ void outlook_calendar_class_init(OutlookCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = outlook_sync;
 	FOCAL_CALENDAR_CLASS(klass)->read_only = outlook_is_read_only;
+	FOCAL_CALENDAR_CLASS(klass)->load_additional_for_date_range = outlook_load_additional_for_date_range;
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
@@ -447,7 +651,10 @@ Calendar* outlook_calendar_new(CalendarConfig* cfg)
 	oc->cfg = cfg;
 	oc->events = NULL;
 	// TODO: error handling
-	oc->tz = g_strdup(realpath("/etc/localtime", NULL) + strlen("/usr/share/zoneinfo/"));
+	char* localtime_link = realpath("/etc/localtime", NULL);
+	oc->tz = g_strdup(localtime_link + strlen("/usr/share/zoneinfo/"));
+	free(localtime_link);
+	oc->ical_tz = icaltimezone_get_builtin_timezone(oc->tz);
 	oc->prefer_tz = g_strdup_printf("Prefer: outlook.timezone=\"%s\"", oc->tz);
 
 	return FOCAL_CALENDAR(oc);
