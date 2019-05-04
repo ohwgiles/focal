@@ -14,7 +14,7 @@
 #ifndef EVENT_H
 #define EVENT_H
 
-#include <glib.h>
+#include <glib-object.h>
 #include <libical/ical.h>
 
 struct _Calendar;
@@ -23,10 +23,10 @@ typedef struct _Calendar Calendar;
 struct _GdkRGBA;
 typedef struct _GdkRGBA GdkRGBA;
 
-// The Event type is a small abstraction layer around an icalcomponent
+// The Event type is an abstraction layer around an icalcomponent
 // of VEVENT type. It adds caldav-specific data members such as etag.
-struct _Event;
-typedef struct _Event Event;
+#define FOCAL_TYPE_EVENT event_get_type()
+G_DECLARE_FINAL_TYPE(Event, event, FOCAL, EVENT, GObject)
 
 // Getters for data members. No data transfer.
 Calendar* event_get_calendar(Event* ev);
@@ -42,6 +42,8 @@ struct icaldurationtype event_get_duration(Event* ev);
 const char* event_get_etag(Event* ev);
 const char* event_get_uid(Event* ev);
 const char* event_get_url(Event* ev);
+const char* event_get_alarm_trigger(Event* ev);
+icaltimetype event_get_alarm_time(Event* ev);
 
 // Calendar object must outlive the Event. This is usually safe since
 // the Event is added to the calendar at the same time and the destruction
@@ -51,6 +53,7 @@ void event_set_calendar(Event* ev, Calendar* cal);
 // Simple data setters
 void event_set_dtstart(Event* ev, icaltimetype dt);
 void event_set_dtend(Event* ev, icaltimetype dt);
+void event_set_alarm_trigger(Event* ev, const char* trigger_string);
 // Sets the participation status of the event by comparing the attendee
 // list with the email address of the Calendar attached to the event.
 gboolean event_set_participation_status(Event* ev, icalparameter_partstat status);
@@ -75,7 +78,10 @@ void event_remove_attendee(Event* ev, icalproperty* attendee);
 // adjusted to the local timezone passed as tz.
 // TODO: is this intuitive? What's wrong with passing the original dtstart?
 typedef void (*EventRecurrenceCallback)(Event* event, icaltimetype dtstart, struct icaldurationtype duration, gpointer user);
-void event_each_recurrence(Event* ev, const icaltimezone* tz, EventRecurrenceCallback callback, gpointer user);
+void event_each_recurrence(Event* ev, icaltimezone* tz, icaltime_span range, EventRecurrenceCallback callback, gpointer user);
+gboolean event_is_recurring(Event* ev);
+
+void event_add_occurrence(Event* ev, icaltimetype start, icaltimetype end);
 
 // Creates a new Event object by reading the contents of the file at the
 // given path. Returns NULL if the file could not be read or parsed.
@@ -84,6 +90,8 @@ Event* event_new_from_ics_file(const char* path);
 // Creates a new Event from an already-created icalcomponent.
 // TODO: try to deprecate
 Event* event_new_from_icalcomponent(icalcomponent* component);
+// Replace the internal component with the passed one
+void event_replace_component(Event* ev, icalcomponent* component);
 
 // Creates a new Event with the given parameters
 Event* event_new(const char* summary, icaltimetype dtstart, icaltimetype dtend, const icaltimezone* tz);

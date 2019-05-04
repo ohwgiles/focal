@@ -27,6 +27,14 @@ sudo make install && sudo update-desktop-database
 # it to set the correct path to the focal executable, and run update-desktop-database
 ```
 
+### Debugging with Valgrind
+
+[Valgrind](http://www.valgrind.org/) is a useful tool for finding memory management bugs. Unfortunately, many libraries used by focal perform one-time static allocations, which makes it difficult to separate them from real memory leaks. To that end, the `focal.suppression` file may be used to suppress these errors when hunting down memory leaks:
+
+```
+valgrind --suppressions=focal.suppression --leak-check=full ./build/focal
+```
+
 ### CalDAV servers
 
 This section describes how to run common CalDAV servers in docker and connect to them with focal.

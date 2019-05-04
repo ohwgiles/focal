@@ -27,6 +27,7 @@ struct _EventPanel {
 	GtkWidget* starts_time;
 	GtkWidget* ends_date;
 	GtkWidget* ends_time;
+	GtkWidget* reminder;
 	GtkTextBuffer* description;
 	GtkWidget* attendees_view;
 	GtkListStore* attendees_model;
@@ -140,6 +141,23 @@ static void event_panel_init(EventPanel* e)
 	e->ends_date = g_object_new(FOCAL_TYPE_DATE_SELECTOR_BUTTON, NULL);
 	e->ends_time = g_object_new(FOCAL_TYPE_TIME_SPIN_BUTTON, 0);
 
+	GtkListStore* reminder_model = gtk_list_store_new(2, G_TYPE_STRING, G_TYPE_STRING);
+	GtkTreeIter iter;
+	gtk_list_store_append(reminder_model, &iter);
+	gtk_list_store_set(reminder_model, &iter, 0, "5 minutes before", 1, "-PT5M", -1);
+	gtk_list_store_append(reminder_model, &iter);
+	gtk_list_store_set(reminder_model, &iter, 0, "10 minutes before", 1, "-PT10M", -1);
+	gtk_list_store_append(reminder_model, &iter);
+	gtk_list_store_set(reminder_model, &iter, 0, "15 minutes before", 1, "-PT15M", -1);
+	gtk_list_store_append(reminder_model, &iter);
+	gtk_list_store_set(reminder_model, &iter, 0, "30 minutes before", 1, "-PT30M", -1);
+	gtk_list_store_append(reminder_model, &iter);
+	gtk_list_store_set(reminder_model, &iter, 0, "1 hour before", 1, "-PT1H", -1);
+
+	e->reminder = gtk_combo_box_text_new();
+	gtk_combo_box_set_model(GTK_COMBO_BOX(e->reminder), GTK_TREE_MODEL(reminder_model));
+	gtk_combo_box_set_id_column(GTK_COMBO_BOX(e->reminder), 1);
+
 	GtkWidget* description_scrolled = g_object_new(GTK_TYPE_SCROLLED_WINDOW, "expand", TRUE, NULL);
 	GtkWidget* description_view = gtk_text_view_new();
 	gtk_widget_set_hexpand(description_view, TRUE);
@@ -178,10 +196,12 @@ static void event_panel_init(EventPanel* e)
 	gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Ends"), 0, 4, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid), e->ends_date, 1, 4, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid), e->ends_time, 2, 4, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 5, 3, 1);
+	gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Reminder"), 0, 5, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), e->reminder, 1, 5, 2, 1);
+	gtk_grid_attach(GTK_GRID(grid), description_scrolled, 0, 6, 3, 1);
 
 	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "use-markup", TRUE, "label", "<span size=\"x-large\">Attendees</span>", NULL), 3, 0, 1, 1);
-	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 3, 1, 1, 5);
+	gtk_grid_attach(GTK_GRID(grid), attendees_scrolled, 3, 1, 1, 6);
 
 	gtk_box_pack_start(GTK_BOX(e), grid, TRUE, TRUE, 0);
 }
@@ -228,6 +248,13 @@ static void on_ends_at_modified(GtkSpinButton* ends_at, EventPanel* ep)
 	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
 }
 
+static void on_reminder_changed(GtkComboBox* reminder, EventPanel* ep)
+{
+	const char* id = gtk_combo_box_get_active_id(reminder);
+	event_set_alarm_trigger(ep->selected_event, id);
+	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
+}
+
 static void on_description_modified(GtkTextBuffer* description, EventPanel* ew)
 {
 	GtkTextIter start, end;
@@ -249,6 +276,7 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 	g_signal_handlers_disconnect_by_func(ew->description, (gpointer) on_description_modified, ew);
 	g_signal_handlers_disconnect_by_func(ew->starts_date, (gpointer) on_start_date_changed, ew);
 	g_signal_handlers_disconnect_by_func(ew->ends_date, (gpointer) on_end_date_changed, ew);
+	g_signal_handlers_disconnect_by_func(ew->reminder, (gpointer) on_reminder_changed, ew);
 
 	gtk_list_store_clear(ew->attendees_model);
 	if ((ew->selected_event = ev)) {
@@ -263,6 +291,8 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 		g_object_set(ew->starts_date, "day", ds.day, "month", ds.month - 1, "year", ds.year, NULL);
 		g_object_set(ew->ends_date, "day", de.day, "month", de.month - 1, "year", de.year, NULL);
 
+		gtk_combo_box_set_active_id(GTK_COMBO_BOX(ew->reminder), event_get_alarm_trigger(ev));
+
 		gtk_text_buffer_set_text(GTK_TEXT_BUFFER(ew->description), event_get_description(ev), -1);
 
 		populate_attendees(ew->attendees_model, ev);
@@ -275,6 +305,7 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 		g_signal_connect(ew->description, "changed", G_CALLBACK(on_description_modified), ew);
 		g_signal_connect(ew->starts_date, "date-changed", G_CALLBACK(on_start_date_changed), ew);
 		g_signal_connect(ew->ends_date, "date-changed", G_CALLBACK(on_end_date_changed), ew);
+		g_signal_connect(ew->reminder, "changed", G_CALLBACK(on_reminder_changed), ew);
 
 		// TODO: more radical change to popup if the calendar is read only
 		gboolean editable = !calendar_is_read_only(event_get_calendar(ev));

@@ -61,12 +61,12 @@ static void update_title(AppHeader* ah)
 
 		// update header subtitle
 		char start[28];
-		strftime(start, sizeof(start), "%e. %B %G", localtime(&ah->display_range.from));
+		strftime(start, sizeof(start), "%e. %B %Y", localtime(&ah->display_range.from));
 
 		// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
 		time_t day_end = ah->display_range.until - 3600;
 		char end[28];
-		strftime(end, sizeof(end), "%e. %B %G", localtime(&day_end));
+		strftime(end, sizeof(end), "%e. %B %Y", localtime(&day_end));
 
 		char subtitle[64];
 		snprintf(subtitle, sizeof(subtitle), "%s – %s", start, end);

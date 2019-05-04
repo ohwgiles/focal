@@ -65,6 +65,13 @@ gboolean calendar_is_read_only(Calendar* self)
 	return FOCAL_CALENDAR_GET_CLASS(self)->read_only(self);
 }
 
+void calendar_sync_date_range(Calendar* self, icaltime_span range)
+{
+	CalendarClass* cc = FOCAL_CALENDAR_GET_CLASS(self);
+	if (cc->sync_date_range)
+		cc->sync_date_range(self, range);
+}
+
 static void on_config_modified(Calendar* self)
 {
 	g_signal_emit(self, calendar_signals[SIGNAL_CONFIG_MODIFIED], 0);

@@ -17,6 +17,7 @@
 #include "calendar-config.h"
 #include "event-panel.h"
 #include "event-popup.h"
+#include "reminder.h"
 #include "week-view.h"
 
 #include <curl/curl.h>
@@ -147,6 +148,8 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 	// The popover might be up and holding a reference to a just-invalidated event
 	gtk_widget_hide(fm->popover);
+
+	reminder_sync_notifications(fm->calendars);
 }
 
 static void calendar_config_modified(FocalApp* fm, Calendar* cal)
@@ -280,12 +283,17 @@ static void workaround_sync_event_detail_with_week_view(GtkWidget* event_panel, 
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
+
 	fm->weekView = week_view_new();
 	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
 	fm->eventDetail = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
 
 	// todo: better separation of ui from calendar models?
 	create_calendars(fm);
+	// We don't actually have to add the calendar to the week view here (it probably hasn't synced yet)
+	// But this will allow week_view_goto_current to call calendar_load_additional_for_date_range
+	for (GSList* p = fm->calendars; p; p = p->next)
+		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), FOCAL_CALENDAR(p->data));
 
 	const GActionEntry entries[] = {
 		{"accounts", open_accounts_dialog},
@@ -377,6 +385,7 @@ static void focal_startup(GApplication* app)
 	g_random_set_seed(time(NULL) * getpid());
 
 	async_curl_init();
+	reminder_init();
 
 	FocalApp* fm = FOCAL_APP(app);
 
@@ -406,6 +415,7 @@ static void focal_shutdown(GApplication* app)
 	g_free(fm->path_accounts);
 	g_free(fm->path_prefs);
 	async_curl_cleanup();
+	reminder_cleanup();
 }
 
 static gint focal_cmdline(GApplication* application, GApplicationCommandLine* command_line)

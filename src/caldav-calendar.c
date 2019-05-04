@@ -243,6 +243,7 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		}
 
 		// "officially" append the event to the collection
+		// TODO: event_replace_component?
 		if (ac->old_event)
 			ac->cal->events = g_slist_remove(ac->cal->events, ac->old_event);
 		if (ac->new_event)
@@ -743,6 +744,7 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
 	FOCAL_CALENDAR_CLASS(klass)->read_only = caldav_is_read_only;
+	FOCAL_CALENDAR_CLASS(klass)->sync_date_range = NULL;
 
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->constructed = constructed;

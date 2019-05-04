@@ -17,6 +17,7 @@
 #include "oauth2-provider.h"
 #include <json-glib/json-glib.h>
 #include <libsecret/secret.h>
+#include <string.h>
 
 typedef struct {
 	void (*callback)();
