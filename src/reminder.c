@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const icaltimezone* current_tz;
+static icaltimezone* current_tz;
 static icaltimetype now;
 static icaltime_span notify_range;
 static GHashTable* reminders;
@@ -102,6 +102,7 @@ static void check_event_add_notification(gpointer user_data, Event* ev)
 static void update_current_time()
 {
 	now = icaltime_current_time_with_zone(current_tz);
+	now.zone = NULL;
 	notify_range.start = icaltime_as_timet(now);
 	// only check events 6 hours in the future. Should be enough for notifications
 	notify_range.end = notify_range.start + 6 * 3600;

@@ -1,3 +1,14 @@
+# CMakeLists.txt
+# This file is part of focal, a calendar application for Linux
+# Copyright 2018-2019 Oliver Giles and focal contributors.
+#
+# Focal is free software: you can redistribute it and/or modify it
+# under the terms of the GNU General Public License version 3 as
+# published by the Free Software Foundation.
+#
+# Focal is distributed without any explicit or implied warranty.
+# You should have received a copy of the GNU General Public License
+# version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
 project(focal)
 cmake_minimum_required(VERSION 2.8)
 
@@ -34,6 +45,12 @@ include_directories(${LIBSECRET_INCLUDE_DIRS})
 pkg_check_modules(JSONGLIB REQUIRED json-glib-1.0)
 include_directories(${JSONGLIB_INCLUDE_DIRS})
 
+# windows timezone to tzid conversion
+find_program(GPERF_EXECUTABLE gperf)
+add_custom_command(OUTPUT windows-tz-map.c
+	COMMAND ${GPERF_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/src/windows-tz-map.gperf > windows-tz-map.c
+	DEPENDS src/windows-tz-map.gperf)
+
 # executable
 add_executable(${PROJECT_NAME}
 	src/account-edit-dialog.c
@@ -61,7 +78,11 @@ add_executable(${PROJECT_NAME}
 	src/remote-auth-oauth2.c
 	src/time-spin-button.c
 	src/week-view.c
+	windows-tz-map.c
 )
+
+set_source_files_properties(windows-tz-map.c
+	PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src)
 
 target_link_libraries(${PROJECT_NAME}
 	${GTK3_LIBRARIES}

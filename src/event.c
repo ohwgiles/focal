@@ -1,7 +1,7 @@
 /*
  * event.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2019 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -266,18 +266,19 @@ typedef struct {
 	Event* ev;
 	struct icaldurationtype duration; // cache
 	gboolean all_day;				  // cache
-	const icaltimezone* user_tz;
+	icaltimezone* user_tz;
 	EventRecurrenceCallback callback;
 	gpointer user_data;
 } EventRecurrenceContext;
 
-void event_each_recurrence_marshaller(icalcomponent* comp, struct icaltime_span* span, void* data)
+static void each_recurrence_marshaller(icalcomponent* comp, struct icaltime_span* span, void* data)
 {
 	EventRecurrenceContext* ctx = (EventRecurrenceContext*) data;
-	ctx->callback(ctx->ev, icaltime_from_timet_with_zone(span->start, ctx->all_day, ctx->user_tz), ctx->duration, ctx->user_data);
+	icaltimetype tt = icaltime_from_timet_with_zone(span->start, ctx->all_day, ctx->user_tz);
+	ctx->callback(ctx->ev, tt, ctx->duration, ctx->user_data);
 }
 
-void event_each_recurrence(Event* ev, const icaltimezone* user_tz, icaltime_span range, EventRecurrenceCallback callback, gpointer user)
+void event_each_recurrence(Event* ev, icaltimezone* user_tz, icaltime_span range, EventRecurrenceCallback callback, gpointer user)
 {
 	EventRecurrenceContext ctx;
 	ctx.ev = ev;
@@ -286,7 +287,35 @@ void event_each_recurrence(Event* ev, const icaltimezone* user_tz, icaltime_span
 	ctx.user_tz = user_tz;
 	ctx.callback = callback;
 	ctx.user_data = user;
-	icalcomponent_foreach_recurrence(ev->cmp, icaltime_from_timet_with_zone(range.start, 0, user_tz), icaltime_from_timet_with_zone(range.end, 0, user_tz), event_each_recurrence_marshaller, &ctx);
+
+	icaltimetype start = icaltime_from_timet_with_zone(range.start, 0, icaltimezone_get_utc_timezone()),
+				 end = icaltime_from_timet_with_zone(range.end, 0, icaltimezone_get_utc_timezone());
+
+	icalcomponent_foreach_recurrence(ev->cmp, start, end, each_recurrence_marshaller, &ctx);
+}
+
+static void test_occurrence_exists(icalcomponent* comp, struct icaltime_span* span, void* data)
+{
+	*((gboolean*) data) = TRUE;
+}
+
+void event_add_occurrence(Event* ev, icaltimetype start, icaltimetype end)
+{
+	// Only add the occurrence if it doesn't already exist. Unfortunately this is awkward to check
+	gboolean exists = FALSE;
+	start = icaltime_convert_to_zone(start, icaltimezone_get_utc_timezone());
+	end = icaltime_convert_to_zone(end, icaltimezone_get_utc_timezone());
+	icalcomponent_foreach_recurrence(ev->cmp, start, end, test_occurrence_exists, &exists);
+
+	if (!exists) {
+		struct icaldatetimeperiodtype p = {
+			.time = start,
+			.period = {
+				.start = start,
+				.end = end,
+				.duration = icaltime_subtract(end, start)}};
+		icalcomponent_add_property(ev->cmp, icalproperty_new_rdate(p));
+	}
 }
 
 gboolean event_is_recurring(Event* ev)

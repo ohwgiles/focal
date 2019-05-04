@@ -698,7 +698,7 @@ void week_view_goto_previous(WeekView* wv)
 		wv->shown_week = weeks_in_year(--wv->shown_year);
 	week_view_populate_view(wv);
 	for (GSList* p = wv->calendars; p; p = p->next)
-		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
+		calendar_sync_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 
@@ -708,7 +708,7 @@ void week_view_goto_current(WeekView* wv)
 	wv->shown_year = wv->now.year;
 	week_view_populate_view(wv);
 	for (GSList* p = wv->calendars; p; p = p->next)
-		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
+		calendar_sync_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 
@@ -719,7 +719,7 @@ void week_view_goto_next(WeekView* wv)
 		wv->shown_year++;
 	week_view_populate_view(wv);
 	for (GSList* p = wv->calendars; p; p = p->next)
-		calendar_load_additional_for_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
+		calendar_sync_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
 	week_view_notify_date_range_changed(wv);
 }
 
