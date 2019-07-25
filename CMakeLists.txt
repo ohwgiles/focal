@@ -81,9 +81,6 @@ add_executable(${PROJECT_NAME}
 	windows-tz-map.c
 )
 
-set_source_files_properties(windows-tz-map.c
-	PROPERTIES INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
 target_link_libraries(${PROJECT_NAME}
 	${GTK3_LIBRARIES}
 	${LIBXML2_LIBRARIES}

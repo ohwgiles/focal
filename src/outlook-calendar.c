@@ -15,7 +15,6 @@
 #include "async-curl.h"
 #include "oauth2-provider-outlook.h"
 #include "remote-auth-oauth2.h"
-#include "windows-tz-map.h"
 #include <curl/curl.h>
 #include <json-glib/json-glib.h>
 #include <libsecret/secret.h>
@@ -36,11 +35,8 @@ struct _OutlookCalendar {
 
 G_DEFINE_TYPE(OutlookCalendar, outlook_calendar, TYPE_CALENDAR)
 
-static const char* outlook_timezone_to_tzid(const char* windows_name)
-{
-	const struct windows_tz* kvp = windows_tz_lookup(windows_name, strlen(windows_name));
-	return kvp ? kvp->tzid : NULL;
-}
+// defined in windows-tz-map.gperf
+extern const char* outlook_timezone_to_tzid(const char* windows_name);
 
 struct EachEventContext {
 	CalendarEachEventCallback callback;
