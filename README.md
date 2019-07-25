@@ -14,7 +14,7 @@ Focal is in very early stages of development and needs a lot more work before it
 
 ```
 # Install dependencies
-sudo apt-get install build-essential git cmake libgtk-3-dev libxml2-dev libical-dev libcurl4-gnutls-dev libjson-glib-dev libsecret-1-dev
+sudo apt-get install build-essential git cmake gperf libgtk-3-dev libxml2-dev libical-dev libcurl4-gnutls-dev libjson-glib-dev libsecret-1-dev
 # Clone the sources
 git clone git@github.com:ohwgiles/focal.git
 # Create a build directory and generate Makefiles
