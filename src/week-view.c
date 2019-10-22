@@ -522,6 +522,42 @@ static void week_view_init(WeekView* wv)
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
 }
 
+// Returns the number of weeks per year according to ISO8601
+// See https://en.wikipedia.org/wiki/ISO_week_date#Weeks_per_year
+static int weeks_in_year_iso8601(int year)
+{
+	int jan1_dow = icaltime_day_of_week(icaltime_from_day_of_year(1, year));
+	if (jan1_dow == ICAL_THURSDAY_WEEKDAY || (jan1_dow == ICAL_WEDNESDAY_WEEKDAY && icaltime_is_leap_year(year)))
+		return 53;
+	else
+		return 52;
+}
+
+// Returns the ISO 8601 week number for the given icaltimetype.
+// Note that this function is necessary because icaltime_week_number
+// does not return the correct values (see #61).
+// See https://en.wikipedia.org/wiki/ISO_week_date#Calculating_the_week_number_of_a_given_date
+static int week_number_iso8601(icaltimetype tt)
+{
+	int doy = icaltime_day_of_year(tt);
+	int dow = (icaltime_day_of_week(tt) - ICAL_MONDAY_WEEKDAY + 7) % 7 + 1;
+	int week = (doy - dow + 10) / 7;
+	week = week > weeks_in_year_iso8601(tt.year) ? 1 : week;
+	return week;
+}
+
+// Returns the ISO 8601 week number we would like to display for the given icaltimetype.
+// Or put another way, the ISO 8601 week number of the "week" to which this date "belongs".
+// This is NOT necessarily the ISO 8601 week number of the given date. According to the
+// standard, week numbers are counted from Monday, but if the widget is configured to display
+// Sunday-Saturday and today is Sunday, it is more useful to display the number corresponding
+// to Monday-Sunday (actually beginning tomorrow).
+static int display_week_number(WeekView* wv, icaltimetype tt)
+{
+	int week = week_number_iso8601(tt);
+	return (wv->weekday_start == 0 && icaltime_day_of_week(tt) == ICAL_SUNDAY_WEEKDAY) ? week + 1 : week;
+}
+
 static void update_current_time(WeekView* wv)
 {
 	struct icaltimetype today = icaltime_current_time_with_zone(wv->current_tz);
@@ -529,7 +565,7 @@ static void update_current_time(WeekView* wv)
 	wv->now.day = today.day;
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today) - ICAL_SUNDAY_WEEKDAY;
-	wv->now.week = icaltime_week_number(today) + 1;
+	wv->now.week = display_week_number(wv, today);
 	wv->now.year = today.year;
 }
 
@@ -662,15 +698,6 @@ icaltime_span week_view_get_current_view(WeekView* wv)
 	return wv->current_view;
 }
 
-static int weeks_in_year(int year)
-{
-	int jan1_dow = icaltime_day_of_week(icaltime_from_day_of_year(1, year));
-	if (jan1_dow == ICAL_THURSDAY_WEEKDAY || (jan1_dow == ICAL_WEDNESDAY_WEEKDAY && icaltime_is_leap_year(year)))
-		return 53;
-	else
-		return 52;
-}
-
 static void week_view_populate_view(WeekView* wv)
 {
 	clear_all_events(wv);
@@ -695,7 +722,7 @@ void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 void week_view_goto_previous(WeekView* wv)
 {
 	if (--wv->shown_week == 0)
-		wv->shown_week = weeks_in_year(--wv->shown_year);
+		wv->shown_week = weeks_in_year_iso8601(--wv->shown_year);
 	week_view_populate_view(wv);
 	for (GSList* p = wv->calendars; p; p = p->next)
 		calendar_sync_date_range(FOCAL_CALENDAR(p->data), wv->current_view);
@@ -714,7 +741,7 @@ void week_view_goto_current(WeekView* wv)
 
 void week_view_goto_next(WeekView* wv)
 {
-	wv->shown_week = wv->shown_week % weeks_in_year(wv->shown_year) + 1;
+	wv->shown_week = wv->shown_week % weeks_in_year_iso8601(wv->shown_year) + 1;
 	if (wv->shown_week == 1)
 		wv->shown_year++;
 	week_view_populate_view(wv);
@@ -750,7 +777,7 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	// The event might not be in the current view
 	icaltimetype dt = event_get_dtstart(event);
 	icaltimetype et = event_get_dtend(event);
-	wv->shown_week = icaltime_week_number(dt) + 1;
+	wv->shown_week = display_week_number(wv, dt);
 	wv->shown_year = dt.year;
 	week_view_populate_view(wv);
 	week_view_notify_date_range_changed(wv);
