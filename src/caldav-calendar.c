@@ -395,7 +395,8 @@ static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde
 	// event updated
 	icalcomponent* comp = icalparser_parse_string(cde->caldata);
 	icalcomponent* vev = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
-	if (!vev) return NULL;
+	if (!vev)
+		return NULL;
 	Event* ev = event_new_from_icalcomponent(vev);
 	event_set_calendar(ev, FOCAL_CALENDAR(cal));
 	event_set_url(ev, cde->href);
@@ -505,18 +506,16 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 	// Everything remaining in ctx.event_list should be new events
 	for (GSList* e = ctx.result_list; e; e = e->next) {
 		CaldavEntry* cde = e->data;
+		Event* event;
 		// A removal or permission denied that was not matched in the local list above will still be here,
 		// but its caldata member will be empty. So it can be ignored.
-		if (cde->caldata) {
-			Event* event = create_event_from_parsed_xml(rc, cde);
-			if (event) {
-				sc->cal->events = g_slist_append(sc->cal->events, event);
-				nNew++;
-				g_signal_emit_by_name(rc, "event-updated", NULL, event);
-				continue;
-			}
+		if (cde->caldata && (event = create_event_from_parsed_xml(rc, cde))) {
+			sc->cal->events = g_slist_append(sc->cal->events, event);
+			nNew++;
+			g_signal_emit_by_name(rc, "event-updated", NULL, event);
+		} else {
+			caldav_entry_free(cde);
 		}
-		caldav_entry_free(cde);
 	}
 	g_slist_free(ctx.result_list);
 
