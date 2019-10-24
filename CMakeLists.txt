@@ -31,7 +31,7 @@ add_definitions(${LIBXML2_DEFINITIONS})
 # cURL
 find_package(CURL REQUIRED)
 include_directories(${CURL_INCLUDE_DIRS})
-add_definitions(${LIBXML2_DEFINITIONS})
+add_definitions(${CURL_DEFINITIONS})
 
 # libical
 pkg_check_modules(ICAL REQUIRED libical)
