@@ -47,6 +47,7 @@ struct _FocalApp {
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
 	GtkWidget* revealer;
+	guint sync_timer_id;
 };
 
 enum {
@@ -280,6 +281,12 @@ static void workaround_sync_event_detail_with_week_view(GtkWidget* event_panel, 
 	gtk_widget_set_size_request(event_panel, allocation->width, allocation->height);
 }
 
+static gboolean sync_func(gpointer userdata)
+{
+	do_calendar_sync(FOCAL_APP(userdata));
+	return G_SOURCE_CONTINUE;
+}
+
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
@@ -357,6 +364,9 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_widget_show_all(fm->mainWindow);
 
 	app_header_set_event(FOCAL_APP_HEADER(fm->header), NULL);
+
+	fm->sync_timer_id = g_timeout_add_seconds(120, G_SOURCE_FUNC(sync_func), fm);
+	g_source_set_name_by_id(fm->sync_timer_id, "[focal] sync_timer");
 }
 
 static void load_preferences(const char* filename, FocalPrefs* out)
@@ -410,6 +420,9 @@ static void focal_activate(GApplication* app)
 static void focal_shutdown(GApplication* app)
 {
 	FocalApp* fm = FOCAL_APP(app);
+
+	if (fm->sync_timer_id)
+		g_source_remove(fm->sync_timer_id);
 	g_slist_free_full(fm->calendars, g_object_unref);
 	g_slist_free_full(fm->accounts, (GDestroyNotify) calendar_config_free);
 	g_free(fm->path_accounts);
