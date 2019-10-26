@@ -376,8 +376,11 @@ static void outlook_sync(Calendar* c)
 {
 	OutlookCalendar* oc = FOCAL_OUTLOOK_CALENDAR(c);
 	// range has not been set yet with outlook_sync_date_range
-	if (!oc->sync_url)
+	if (!oc->sync_url) {
+		// Date range not yet set. Probably initial sync. Notify done so it will be added to the view. TODO cleaner way?
+		g_signal_emit_by_name(oc, "sync-done", 0);
 		return;
+	}
 
 	remote_auth_new_request(oc->auth, do_outlook_sync, oc, NULL);
 }
@@ -506,6 +509,7 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 			Event* existing = g_hash_table_lookup(oc->events, id);
 
 			if (delete) {
+				g_signal_emit_by_name(oc, "event-updated", existing, NULL);
 				g_hash_table_remove(oc->events, id);
 			} else if (existing) {
 				// Can't just call populate_event_from_json because currently it assumes
@@ -515,11 +519,13 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 				icalcomponent_remove_property(cmp, icalcomponent_get_first_property(cmp, ICAL_RRULE_PROPERTY));
 				// then repopulate...
 				populate_event_from_json(existing, reader);
+				g_signal_emit_by_name(oc, "event-updated", existing, existing);
 			} else {
 				Event* event = event_new_from_icalcomponent(icalcomponent_new_vevent());
 				populate_event_from_json(event, reader);
 				event_set_calendar(event, FOCAL_CALENDAR(oc));
 				g_hash_table_insert(oc->events, g_strdup(event_get_url(event)), event);
+				g_signal_emit_by_name(oc, "event-updated", NULL, event);
 			}
 			free(id);
 		}

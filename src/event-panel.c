@@ -266,6 +266,14 @@ static void on_description_modified(GtkTextBuffer* description, EventPanel* ew)
 	// No signal emitted since the description is not visible in the main view anyway
 }
 
+static void event_updated(EventPanel* ep, Event* old_event, Event* new_event, Calendar* cal)
+{
+	// TODO: maybe notify the user that the event has changed out from underneath them?
+	if(old_event == ep->selected_event && new_event) {
+		event_panel_set_event(ep, new_event);
+	}
+}
+
 void event_panel_set_event(EventPanel* ew, Event* ev)
 {
 	g_signal_handlers_disconnect_by_func(ew->title, (gpointer) on_event_title_modified, ew);
@@ -312,5 +320,8 @@ void event_panel_set_event(EventPanel* ew, Event* ev)
 		gtk_widget_set_sensitive(ew->title, editable);
 		gtk_widget_set_sensitive(ew->starts_date, editable);
 		gtk_widget_set_sensitive(ew->ends_date, editable);
+
+		// TODO what if the event doesn't have a calendar yet?
+		g_signal_connect_swapped(event_get_calendar(ev), "event-updated", G_CALLBACK(event_updated), ew);
 	}
 }

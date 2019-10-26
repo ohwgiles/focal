@@ -32,6 +32,7 @@ G_DECLARE_FINAL_TYPE(FocalApp, focal_app, FOCAL, APP, GtkApplication)
 typedef struct {
 	int week_start_day;
 	int week_end_day;
+	int auto_sync_interval;
 } FocalPrefs;
 
 struct _FocalApp {
@@ -47,6 +48,7 @@ struct _FocalApp {
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
 	GtkWidget* revealer;
+	int running_syncs;
 	guint sync_timer_id;
 };
 
@@ -72,15 +74,6 @@ static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* c
 			// TODO: consider implementing an early break from event_each_attendee
 			return;
 		}
-	}
-}
-
-static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalApp* fm)
-{
-	if (ev) {
-		event_popup_set_event(FOCAL_EVENT_POPUP(fm->popover), ev);
-		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
-		gtk_popover_popup(GTK_POPOVER(fm->popover));
 	}
 }
 
@@ -120,6 +113,23 @@ static void close_details_panel(FocalApp* fa)
 	app_header_set_event(FOCAL_APP_HEADER(fa->header), NULL);
 }
 
+static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, FocalApp* fm)
+{
+	event_popup_set_event(FOCAL_EVENT_POPUP(fm->popover), ev);
+	if (ev) {
+		gtk_popover_set_pointing_to(GTK_POPOVER(fm->popover), rect);
+		gtk_popover_popup(GTK_POPOVER(fm->popover));
+	} else {
+		gtk_widget_hide(fm->popover);
+		// The selection cannot be changed by the user when the details panel is open,
+		// but we get this deselection event from the WeekView when it is notified that
+		// the event has been deleted on the remote side. So in case the user has it open
+		// while a background sync detects a deletion, close the panel to prevent its use
+		// of invalid memory
+		close_details_panel(fm);
+	}
+}
+
 void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
 {
 	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
@@ -142,21 +152,34 @@ void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
 	g_simple_action_set_state(action, value);
 }
 
-static void calendar_synced(FocalApp* fm, Calendar* cal)
-{
-	// TODO more efficiently?
-	week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
-	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
-	// The popover might be up and holding a reference to a just-invalidated event
-	gtk_widget_hide(fm->popover);
-
-	reminder_sync_notifications(fm->calendars);
-}
-
 static void calendar_config_modified(FocalApp* fm, Calendar* cal)
 {
 	// write config back to file
 	calendar_config_write_to_file(fm->path_accounts, fm->accounts);
+}
+
+static void calendar_synced(FocalApp* fm, Calendar* cal)
+{
+	// Calendar sync handler re-attached in do_calendar_sync and removed each time. See comment
+	// in initial_calendar_sync_done
+	g_signal_handlers_disconnect_by_func(cal, calendar_synced, fm);
+
+	if(--fm->running_syncs == 0) {
+		app_header_set_sync_in_progress(FOCAL_APP_HEADER(fm->header), FALSE);
+		reminder_sync_notifications(fm->calendars);
+	}
+}
+
+static void initial_calendar_sync_done(FocalApp* fm, Calendar* cal)
+{
+	g_signal_handlers_disconnect_by_func(cal, initial_calendar_sync_done, fm);
+	// We don't connect sync-done here, instead disconnect and reattach each time a sync happens.
+	// While less efficient, this prevents messing up our state when we get unexpected extra sync-done
+	// events triggered by e.g. WeekView when the date range changes. TODO a better way could be to tag
+	// each calendar with whether we are are expecting a sync-done, and remove the running_syncs counter.
+
+	fm->calendars = g_slist_append(fm->calendars, cal);
+	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
 }
 
 static void create_calendars(FocalApp* fm)
@@ -164,15 +187,14 @@ static void create_calendars(FocalApp* fm)
 	for (GSList* p = fm->accounts; p; p = p->next) {
 		CalendarConfig* cfg = p->data;
 		Calendar* cal = calendar_create(cfg);
-		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
 		g_signal_connect_swapped(cal, "config-modified", (GCallback) calendar_config_modified, fm);
-		fm->calendars = g_slist_append(fm->calendars, cal);
+		// Perform initial sync once, before connecting too many signals. This means for example,
+		// the week view won't be inundanted with event-updated signals.
+		// TODO how to free or try again if the initial sync fails?
+		g_signal_connect_swapped(cal, "sync-done", G_CALLBACK(initial_calendar_sync_done), fm);
 		calendar_sync(cal);
-	}
 
-	// create window actions
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(FOCAL_CALENDAR(p->data)));
+		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(cal));
 		GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
 		g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
 		g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
@@ -198,12 +220,23 @@ static GMenu* create_menu(FocalApp* fm)
 	return menu_main;
 }
 
-static void do_calendar_sync(FocalApp* fm)
+static gboolean do_calendar_sync(FocalApp* fm)
 {
+	// Don't run if a sync is already in progress
+	if(fm->running_syncs > 0) {
+		g_info("%s", "Ignoring sync request while sync running");
+		return G_SOURCE_CONTINUE;
+	}
+
+	app_header_set_sync_in_progress(FOCAL_APP_HEADER(fm->header), TRUE);
 	for (GSList* p = fm->calendars; p; p = p->next) {
 		Calendar* cal = FOCAL_CALENDAR(p->data);
+		fm->running_syncs++;
+
+		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
 		calendar_sync(cal);
 	}
+	return G_SOURCE_CONTINUE;
 }
 
 static void on_accounts_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
@@ -235,6 +268,17 @@ static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpo
 	gtk_widget_show_all(accounts);
 }
 
+static void apply_preferences(FocalApp* fa)
+{
+	week_view_set_day_span(FOCAL_WEEK_VIEW(fa->weekView), fa->prefs.week_start_day, fa->prefs.week_end_day);
+	if(fa->sync_timer_id)
+		g_source_remove(fa->sync_timer_id);
+	if(fa->prefs.auto_sync_interval) {
+		fa->sync_timer_id = g_timeout_add_seconds(fa->prefs.auto_sync_interval, G_SOURCE_FUNC(do_calendar_sync), fa);
+		g_source_set_name_by_id(fa->sync_timer_id, "[focal] sync_timer");
+	}
+}
+
 static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
 {
 	FocalApp* fm = FOCAL_APP(user_data);
@@ -249,11 +293,23 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 	gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo), id);
 	g_free(id);
 
+	GtkWidget* combo_autosync = gtk_combo_box_text_new();
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_autosync), "0", "Never");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_autosync), "30", "Every 30 seconds");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_autosync), "120", "Every 2 minutes");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_autosync), "600", "Every 10 minutes");
+	gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(combo_autosync), "3600", "Every 1 hour");
+	id = g_strdup_printf("%d", fm->prefs.auto_sync_interval);
+	gtk_combo_box_set_active_id(GTK_COMBO_BOX(combo_autosync), id);
+	g_free(id);
+
 	GtkWidget* grid = gtk_grid_new();
 	g_object_set(grid, "column-spacing", 12, "row-spacing", 9, "margin-bottom", 12, "margin-top", 12, NULL);
 	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "<b>Display</b>", "use-markup", TRUE, "halign", GTK_ALIGN_START, NULL), 0, 0, 2, 1);
 	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Week span:", "halign", GTK_ALIGN_END, NULL), 0, 1, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid), combo, 1, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), g_object_new(GTK_TYPE_LABEL, "label", "Automatic sync:", "halign", GTK_ALIGN_END, NULL), 0, 2, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), combo_autosync, 1, 2, 1, 1);
 
 	GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	g_object_set(content, "margin", 6, NULL);
@@ -262,16 +318,18 @@ static void open_prefs_dialog(GSimpleAction* simple, GVariant* parameter, gpoint
 	gtk_widget_show_all(dialog);
 	if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_OK) {
 		sscanf(gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo)), "%d,%d", &fm->prefs.week_start_day, &fm->prefs.week_end_day);
+		fm->prefs.auto_sync_interval = atoi(gtk_combo_box_get_active_id(GTK_COMBO_BOX(combo_autosync)));
 		// save preferences
 		GKeyFile* kf = g_key_file_new();
 		GError* err = NULL;
 		g_key_file_load_from_file(kf, fm->path_prefs, G_KEY_FILE_KEEP_COMMENTS, NULL);
 		g_key_file_set_integer(kf, "general", "week_start_day", fm->prefs.week_start_day);
 		g_key_file_set_integer(kf, "general", "week_end_day", fm->prefs.week_end_day);
+		g_key_file_set_integer(kf, "general", "auto_sync_interval", fm->prefs.auto_sync_interval);
 		g_key_file_save_to_file(kf, fm->path_prefs, &err);
 		g_key_file_free(kf);
-		// update view
-		week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
+
+		apply_preferences(fm);
 	}
 	gtk_widget_destroy(dialog);
 }
@@ -281,26 +339,15 @@ static void workaround_sync_event_detail_with_week_view(GtkWidget* event_panel, 
 	gtk_widget_set_size_request(event_panel, allocation->width, allocation->height);
 }
 
-static gboolean sync_func(gpointer userdata)
-{
-	do_calendar_sync(FOCAL_APP(userdata));
-	return G_SOURCE_CONTINUE;
-}
-
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
 
 	fm->weekView = week_view_new();
-	week_view_set_day_span(FOCAL_WEEK_VIEW(fm->weekView), fm->prefs.week_start_day, fm->prefs.week_end_day);
 	fm->eventDetail = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
 
 	// todo: better separation of ui from calendar models?
 	create_calendars(fm);
-	// We don't actually have to add the calendar to the week view here (it probably hasn't synced yet)
-	// But this will allow week_view_goto_current to call calendar_load_additional_for_date_range
-	for (GSList* p = fm->calendars; p; p = p->next)
-		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), FOCAL_CALENDAR(p->data));
 
 	const GActionEntry entries[] = {
 		{"accounts", open_accounts_dialog},
@@ -358,15 +405,14 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	// reasonable default size
 	gtk_window_set_default_size(GTK_WINDOW(fm->mainWindow), 780, 630);
 
+	apply_preferences(fm);
+
 	// minor hack to force a titlebar update. TODO: move the initial week setting outside of weekview?
 	week_view_goto_current(FOCAL_WEEK_VIEW(fm->weekView));
 
 	gtk_widget_show_all(fm->mainWindow);
 
 	app_header_set_event(FOCAL_APP_HEADER(fm->header), NULL);
-
-	fm->sync_timer_id = g_timeout_add_seconds(120, G_SOURCE_FUNC(sync_func), fm);
-	g_source_set_name_by_id(fm->sync_timer_id, "[focal] sync_timer");
 }
 
 static void load_preferences(const char* filename, FocalPrefs* out)
@@ -374,6 +420,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 	// set defaults
 	out->week_start_day = 0; // Sunday
 	out->week_end_day = 6;   // Saturday
+	out->auto_sync_interval = 0; // Auto-sync disabled
 
 	GKeyFile* kf = g_key_file_new();
 	GError* err = NULL;
@@ -386,6 +433,7 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 	}
 	out->week_start_day = g_key_file_get_integer(kf, "general", "week_start_day", NULL);
 	out->week_end_day = g_key_file_get_integer(kf, "general", "week_end_day", NULL);
+	out->auto_sync_interval = g_key_file_get_integer(kf, "general", "auto_sync_interval", NULL);
 	g_key_file_free(kf);
 }
 
@@ -478,6 +526,8 @@ static void focal_app_class_init(FocalAppClass* klass)
 
 static void focal_app_init(FocalApp* focal)
 {
+	focal->sync_timer_id = 0;
+	focal->running_syncs = 0;
 }
 
 int main(int argc, char** argv)

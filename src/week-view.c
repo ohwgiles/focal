@@ -48,6 +48,7 @@ struct _WeekView {
 	// function to avoid mistakes
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
+	Event* current_selection; // TODO should probably be an EventWidget or otherwise a specific recurrence
 	int shown_week; // 1-based, note libical is 0-based
 	int shown_year;
 	int weekday_start; // 0-based, note libical is 1-based
@@ -329,6 +330,7 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 			rect.y = day_begin_yoffset + (ew->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
 			rect.height = (ew->minutes_to - ew->minutes_from) * HALFHOUR_HEIGHT / 30;
 		}
+		wv->current_selection = ew->ev;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ew->ev, &rect);
 
 	} else if (event->type == GDK_2BUTTON_PRESS) {
@@ -362,9 +364,11 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 
 		week_view_add_event(wv, ev);
 		gtk_widget_queue_draw((GtkWidget*) wv);
+		wv->current_selection = ev;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
 	} else {
 		// deselect
+		wv->current_selection = NULL;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 	}
 
@@ -623,6 +627,8 @@ GtkWidget* week_view_new(void)
 	cw->now.within_shown_range = TRUE;
 	g_timeout_add_seconds(120, &timer_update_current_time, cw);
 
+	cw->current_selection = NULL;
+
 	return (GtkWidget*) cw;
 }
 
@@ -669,6 +675,11 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
 	dayindex di = dayindex_from_icaltime(wv, dtstart);
 
+	if(wv->current_selection == ev) {
+		wv->current_selection = NULL;
+		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
+	}
+
 	EventWidget** ll = dtstart.is_date ? &wv->events_allday[di] : &wv->events_week[di];
 	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
 		if ((*ew)->ev == ev) {
@@ -678,13 +689,28 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 			break;
 		}
 	}
+
 	gtk_widget_queue_draw((GtkWidget*) wv);
+}
+
+static void calendar_event_updated(WeekView* wv, Event* old_event, Event* new_event, Calendar* cal)
+{
+	printf("calendar_event_updated\n");
+
+	// all references to old_event are about to become invalid
+	if(old_event) {
+		week_view_remove_event(wv, old_event);
+	}
+	if(new_event) {
+		week_view_add_event(wv, new_event);
+	}
 }
 
 void week_view_add_calendar(WeekView* wv, Calendar* cal)
 {
 	wv->calendars = g_slist_append(wv->calendars, cal);
 	calendar_each_event(cal, add_event_from_calendar, wv);
+	g_signal_connect_swapped(cal, "event-updated", G_CALLBACK(calendar_event_updated), wv);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
@@ -715,6 +741,7 @@ static void week_view_populate_view(WeekView* wv)
 
 void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 {
+	g_signal_handlers_disconnect_by_func(cal, G_CALLBACK(calendar_event_updated), wv);
 	wv->calendars = g_slist_remove(wv->calendars, cal);
 	week_view_populate_view(wv);
 }

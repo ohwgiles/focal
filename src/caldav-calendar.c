@@ -249,8 +249,7 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		if (ac->new_event)
 			ac->cal->events = g_slist_append(ac->cal->events, ac->new_event);
 
-		// reuse the sync-done event since for now the action is the same -> refresh the UI
-		g_signal_emit_by_name(ac->cal, "sync-done", 0);
+		g_signal_emit_by_name(ac->cal, "event-updated", ac->old_event, ac->new_event);
 	} else {
 		// TODO report error via UI
 		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
@@ -469,15 +468,20 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 						// we already knew about this update (we probably did it ourselves). Just ignore it.
 						caldav_entry_free(cde);
 					} else {
+						Event* updated_event = create_event_from_parsed_xml(rc, cde);
+						// notify anyone using the old event that it's about to disappear
+						g_signal_emit_by_name(rc, "event-updated", (*p)->data, updated_event);
 						// replace the old event with the new one
 						event_free((*p)->data);
-						(*p)->data = create_event_from_parsed_xml(rc, cde);
+						(*p)->data = updated_event;
 						nUpdated++;
 					}
 				} else {
 					// If the calendar-data is NULL, assume the event is deleted. This can
 					// happen if an event is removed after the sync-collection request but
-					// before the response to this multiget.
+					// before the response to this multiget. Notify anyone using the event
+					// that it's about to disappear.
+					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
 					event_free((*p)->data);
 					*p = (*p)->next;
 					caldav_entry_free(cde);
@@ -507,6 +511,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 			Event* event = create_event_from_parsed_xml(rc, cde);
 			sc->cal->events = g_slist_append(sc->cal->events, event);
 			nNew++;
+			g_signal_emit_by_name(rc, "event-updated", NULL, event);
 		} else {
 			caldav_entry_free(cde);
 		}
@@ -621,6 +626,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 			for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
 				Event* ee = (Event*) (*p)->data;
 				if (strcmp(se->href, event_get_url(ee)) == 0) {
+					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
 					event_free((*p)->data);
 					*p = (*p)->next;
 					nDeleted++;

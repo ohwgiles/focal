@@ -110,8 +110,12 @@ void ics_calendar_init(IcsCalendar* lc)
 
 static void sync_done(IcsCalendar* ic, const GString* data)
 {
+	if(ic->ical)
+		icalcomponent_free(ic->ical);
 	ic->ical = icalcomponent_new_from_string(data->str);
 	g_assert_nonnull(ic->ical);
+
+	// TODO how do we know if items were removed spontaneously?
 
 	for (icalcomponent* e = icalcomponent_get_first_component(ic->ical, ICAL_VEVENT_COMPONENT); (e = icalcomponent_get_current_component(ic->ical));) {
 		if (icalcomponent_isa(e) == ICAL_VEVENT_COMPONENT) {
@@ -121,10 +125,13 @@ static void sync_done(IcsCalendar* ic, const GString* data)
 			Event* existing = (Event*) g_hash_table_lookup(ic->events, uid);
 			if (existing) {
 				event_replace_component(existing, icalcomponent_new_clone(e));
+				// TODO only if actually modified?
+				g_signal_emit_by_name(ic, "event-updated", existing, existing);
 			} else {
 				Event* ev = event_new_from_icalcomponent(icalcomponent_new_clone(e));
 				event_set_calendar(ev, FOCAL_CALENDAR(ic));
 				g_hash_table_insert(ic->events, g_strdup(uid), ev);
+				g_signal_emit_by_name(ic, "event-updated", NULL, ev);
 			}
 			icalcomponent_remove_component(ic->ical, e);
 			icalcomponent_free(e);

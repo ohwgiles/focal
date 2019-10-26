@@ -176,6 +176,14 @@ static void on_duration_modified(GtkSpinButton* duration, EventPopup* ep)
 	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
 }
 
+static void event_updated(EventPopup* ep, Event* old_event, Event* new_event, Calendar* cal)
+{
+	// TODO: maybe notify the user that the event has changed out from underneath them?
+	if(old_event == ep->selected_event) {
+		event_popup_set_event(ep, new_event);
+	}
+}
+
 void event_popup_set_event(EventPopup* ew, Event* ev)
 {
 	g_signal_handlers_disconnect_by_func(ew->title, (gpointer) on_event_title_modified, ew);
@@ -203,5 +211,8 @@ void event_popup_set_event(EventPopup* ew, Event* ev)
 		gtk_widget_set_sensitive(ew->duration, editable);
 		gtk_widget_set_sensitive(ew->btn_save, editable);
 		gtk_widget_set_sensitive(ew->btn_delete, editable);
+
+		// TODO what if the event doesn't have a calendar yet?
+		g_signal_connect_swapped(event_get_calendar(ev), "event-updated", G_CALLBACK(event_updated), ew);
 	}
 }
