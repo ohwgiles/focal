@@ -398,7 +398,7 @@ static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde
 	if (!vev) {
 		icalcomponent_free(comp);
 		return NULL;
-	};
+	}
 	Event* ev = event_new_from_icalcomponent(vev);
 	event_set_calendar(ev, FOCAL_CALENDAR(cal));
 	event_set_url(ev, cde->href);
