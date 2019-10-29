@@ -117,31 +117,37 @@ static void event_popup_init(EventPopup* e)
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("emblem-ok-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_yes_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Attending");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-question-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_maybe_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Tentative");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-error-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_no_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Decline");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	e->btn_delete = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->btn_delete), gtk_image_new_from_icon_name("edit-delete-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(e->btn_delete, "clicked", (GCallback) &delete_clicked, e);
+	gtk_widget_set_tooltip_text(e->btn_delete, "Delete");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), e->btn_delete);
 
 	e->btn_save = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->btn_save), gtk_image_new_from_icon_name("document-save-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(e->btn_save, "clicked", (GCallback) &save_clicked, e);
+	gtk_widget_set_tooltip_text(e->btn_save, "Save");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), e->btn_save);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("view-more-horizontal-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &open_details, e);
+	gtk_widget_set_tooltip_text(btn, "Details...");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), btn);
 
 	gtk_box_pack_start(GTK_BOX(box), bar, FALSE, FALSE, 0);
