@@ -164,7 +164,7 @@ static void calendar_synced(FocalApp* fm, Calendar* cal)
 	// in initial_calendar_sync_done
 	g_signal_handlers_disconnect_by_func(cal, calendar_synced, fm);
 
-	if(--fm->running_syncs == 0) {
+	if (--fm->running_syncs == 0) {
 		app_header_set_sync_in_progress(FOCAL_APP_HEADER(fm->header), FALSE);
 		reminder_sync_notifications(fm->calendars);
 	}
@@ -223,7 +223,7 @@ static GMenu* create_menu(FocalApp* fm)
 static gboolean do_calendar_sync(FocalApp* fm)
 {
 	// Don't run if a sync is already in progress
-	if(fm->running_syncs > 0) {
+	if (fm->running_syncs > 0) {
 		g_info("%s", "Ignoring sync request while sync running");
 		return G_SOURCE_CONTINUE;
 	}
@@ -271,9 +271,9 @@ static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpo
 static void apply_preferences(FocalApp* fa)
 {
 	week_view_set_day_span(FOCAL_WEEK_VIEW(fa->weekView), fa->prefs.week_start_day, fa->prefs.week_end_day);
-	if(fa->sync_timer_id)
+	if (fa->sync_timer_id)
 		g_source_remove(fa->sync_timer_id);
-	if(fa->prefs.auto_sync_interval) {
+	if (fa->prefs.auto_sync_interval) {
 		fa->sync_timer_id = g_timeout_add_seconds(fa->prefs.auto_sync_interval, G_SOURCE_FUNC(do_calendar_sync), fa);
 		g_source_set_name_by_id(fa->sync_timer_id, "[focal] sync_timer");
 	}
@@ -418,8 +418,8 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 static void load_preferences(const char* filename, FocalPrefs* out)
 {
 	// set defaults
-	out->week_start_day = 0; // Sunday
-	out->week_end_day = 6;   // Saturday
+	out->week_start_day = 0;	 // Sunday
+	out->week_end_day = 6;		 // Saturday
 	out->auto_sync_interval = 0; // Auto-sync disabled
 
 	GKeyFile* kf = g_key_file_new();

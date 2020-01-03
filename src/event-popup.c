@@ -185,7 +185,7 @@ static void on_duration_modified(GtkSpinButton* duration, EventPopup* ep)
 static void event_updated(EventPopup* ep, Event* old_event, Event* new_event, Calendar* cal)
 {
 	// TODO: maybe notify the user that the event has changed out from underneath them?
-	if(old_event == ep->selected_event) {
+	if (old_event == ep->selected_event) {
 		event_popup_set_event(ep, new_event);
 	}
 }

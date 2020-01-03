@@ -110,7 +110,7 @@ void ics_calendar_init(IcsCalendar* lc)
 
 static void sync_done(IcsCalendar* ic, const GString* data)
 {
-	if(ic->ical)
+	if (ic->ical)
 		icalcomponent_free(ic->ical);
 	ic->ical = icalcomponent_new_from_string(data->str);
 	g_assert_nonnull(ic->ical);

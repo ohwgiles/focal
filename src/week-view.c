@@ -43,12 +43,14 @@ struct _WeekView {
 	double scroll_pos;
 	GtkAdjustment* adj;
 	GSList* calendars;
+
 	// Array index represents column in week view, which might be Sunday
 	// or Monday. Use the dayindex typedef and dayindex_from_icaltime
 	// function to avoid mistakes
 	EventWidget* events_week[7];
 	EventWidget* events_allday[7];
 	Event* current_selection; // TODO should probably be an EventWidget or otherwise a specific recurrence
+
 	int shown_week; // 1-based, note libical is 0-based
 	int shown_year;
 	int weekday_start; // 0-based, note libical is 1-based
@@ -675,7 +677,7 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	icaltimezone_convert_time(&dtstart, (icaltimezone*) tz, wv->current_tz);
 	dayindex di = dayindex_from_icaltime(wv, dtstart);
 
-	if(wv->current_selection == ev) {
+	if (wv->current_selection == ev) {
 		wv->current_selection = NULL;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 	}
@@ -698,10 +700,10 @@ static void calendar_event_updated(WeekView* wv, Event* old_event, Event* new_ev
 	printf("calendar_event_updated\n");
 
 	// all references to old_event are about to become invalid
-	if(old_event) {
+	if (old_event) {
 		week_view_remove_event(wv, old_event);
 	}
-	if(new_event) {
+	if (new_event) {
 		week_view_add_event(wv, new_event);
 	}
 }

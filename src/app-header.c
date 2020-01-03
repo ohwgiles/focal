@@ -225,7 +225,7 @@ void app_header_calendar_view_changed(AppHeader* ah, int week_number, time_t fro
 void app_header_set_sync_in_progress(AppHeader* ah, gboolean in_progress)
 {
 	gtk_button_set_image(GTK_BUTTON(ah->btn_sync), in_progress ? ah->icon_progress : ah->icon_sync);
-	if(in_progress)
+	if (in_progress)
 		gtk_spinner_start(GTK_SPINNER(ah->icon_progress));
 	else
 		gtk_spinner_stop(GTK_SPINNER(ah->icon_progress));

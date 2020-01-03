@@ -269,7 +269,7 @@ static void on_description_modified(GtkTextBuffer* description, EventPanel* ew)
 static void event_updated(EventPanel* ep, Event* old_event, Event* new_event, Calendar* cal)
 {
 	// TODO: maybe notify the user that the event has changed out from underneath them?
-	if(old_event == ep->selected_event && new_event) {
+	if (old_event == ep->selected_event && new_event) {
 		event_panel_set_event(ep, new_event);
 	}
 }
