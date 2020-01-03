@@ -543,12 +543,14 @@ static int weeks_in_year_iso8601(int year)
 // Note that this function is necessary because icaltime_week_number
 // does not return the correct values (see #61).
 // See https://en.wikipedia.org/wiki/ISO_week_date#Calculating_the_week_number_of_a_given_date
+// A complete implementation should check that the returned value is not
+// greater than the number of weeks in the given year and wrap it if so, but
+// we don't do that because we also need to wrap the year in that case.
 static int week_number_iso8601(icaltimetype tt)
 {
 	int doy = icaltime_day_of_year(tt);
 	int dow = (icaltime_day_of_week(tt) - ICAL_MONDAY_WEEKDAY + 7) % 7 + 1;
 	int week = (doy - dow + 10) / 7;
-	week = week > weeks_in_year_iso8601(tt.year) ? 1 : week;
 	return week;
 }
 
@@ -558,10 +560,22 @@ static int week_number_iso8601(icaltimetype tt)
 // standard, week numbers are counted from Monday, but if the widget is configured to display
 // Sunday-Saturday and today is Sunday, it is more useful to display the number corresponding
 // to Monday-Sunday (actually beginning tomorrow).
-static int display_week_number(WeekView* wv, icaltimetype tt)
+static void display_week_year(WeekView* wv, icaltimetype tt, int* out_week, int* out_year)
 {
 	int week = week_number_iso8601(tt);
-	return (wv->weekday_start == 0 && icaltime_day_of_week(tt) == ICAL_SUNDAY_WEEKDAY) ? week + 1 : week;
+	int year = tt.year;
+
+	printf("%d %d %d\n", week, wv->weekday_start, icaltime_day_of_week(tt));
+	if (wv->weekday_start == 0 && icaltime_day_of_week(tt) == ICAL_SUNDAY_WEEKDAY)
+		week++;
+
+	if (week > weeks_in_year_iso8601(tt.year)) {
+		year++;
+		week = 1;
+	}
+
+	*out_week = week;
+	*out_year = year;
 }
 
 static void update_current_time(WeekView* wv)
@@ -571,8 +585,7 @@ static void update_current_time(WeekView* wv)
 	wv->now.day = today.day;
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today) - ICAL_SUNDAY_WEEKDAY;
-	wv->now.week = display_week_number(wv, today);
-	wv->now.year = today.year;
+	display_week_year(wv, today, &wv->now.week, &wv->now.year);
 }
 
 static gboolean timer_update_current_time(gpointer user_data)
@@ -806,8 +819,7 @@ void week_view_focus_event(WeekView* wv, Event* event)
 	// The event might not be in the current view
 	icaltimetype dt = event_get_dtstart(event);
 	icaltimetype et = event_get_dtend(event);
-	wv->shown_week = display_week_number(wv, dt);
-	wv->shown_year = dt.year;
+	display_week_year(wv, dt, &wv->shown_week, &wv->shown_year);
 	week_view_populate_view(wv);
 	week_view_notify_date_range_changed(wv);
 
