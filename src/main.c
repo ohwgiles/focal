@@ -14,9 +14,12 @@
 #include "accounts-dialog.h"
 #include "app-header.h"
 #include "async-curl.h"
+#include "calendar-collection.h"
 #include "calendar-config.h"
+#include "calendar.h"
 #include "event-panel.h"
 #include "event-popup.h"
+#include "event.h"
 #include "reminder.h"
 #include "week-view.h"
 
@@ -43,7 +46,8 @@ struct _FocalApp {
 	FocalPrefs prefs;
 	char* path_accounts;
 	GSList* accounts;
-	GSList* calendars;
+	//GSList* calendars;
+	CalendarCollection* calendars;
 	GtkWidget* weekView;
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
@@ -80,14 +84,6 @@ static void match_event_to_calendar(Event* ev, icalproperty* attendee, GSList* c
 static void focal_add_event(FocalApp* focal, Event* ev)
 {
 	event_each_attendee(ev, match_event_to_calendar, focal->calendars);
-
-	Calendar* cal = event_get_calendar(ev);
-	// TODO allow selecting a calendar in the dialog
-	if (!cal) {
-		cal = FOCAL_CALENDAR(focal->calendars->data);
-		event_set_calendar(ev, cal);
-	}
-
 	week_view_focus_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 	week_view_add_event(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
@@ -95,7 +91,6 @@ static void focal_add_event(FocalApp* focal, Event* ev)
 static void on_event_modified(EventPanel* event_panel, Event* ev, FocalApp* focal)
 {
 	// needed in case the time, duration or summary changed
-	// TODO once moving events between calendars is supported, this will not be sufficient
 	week_view_refresh(FOCAL_WEEK_VIEW(focal->weekView), ev);
 }
 
@@ -130,25 +125,21 @@ static void cal_event_selected(WeekView* widget, Event* ev, GdkRectangle* rect, 
 	}
 }
 
-void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
+static void toggle_calendar(GSimpleAction* action, GVariant* value, FocalApp* fm)
 {
-	const char* calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
 	Calendar* calendar = NULL;
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		if (strcmp(calendar_name, calendar_get_name(FOCAL_CALENDAR(p->data))) == 0) {
-			calendar = FOCAL_CALENDAR(p->data);
-			break;
-		}
-	}
+	const char* calendar_name;
 
-	if (!calendar)
-		return;
+	calendar_name = strchr(g_action_get_name(G_ACTION(action)), '.') + 1;
+	calendar = calendar_collection_get_by_name(fm->calendars, calendar_name);
+	g_assert_nonnull(calendar);
 
 	if (g_variant_get_boolean(value))
 		week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
 	else
 		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), calendar);
 
+	calendar_collection_set_enabled(fm->calendars, calendar, g_variant_get_boolean(value));
 	g_simple_action_set_state(action, value);
 }
 
@@ -158,65 +149,18 @@ static void calendar_config_modified(FocalApp* fm, Calendar* cal)
 	calendar_config_write_to_file(fm->path_accounts, fm->accounts);
 }
 
-static void calendar_synced(FocalApp* fm, Calendar* cal)
+static void calendar_synced(FocalApp* fm)
 {
-	// Calendar sync handler re-attached in do_calendar_sync and removed each time. See comment
-	// in initial_calendar_sync_done
-	g_signal_handlers_disconnect_by_func(cal, calendar_synced, fm);
-
 	if (--fm->running_syncs == 0) {
 		app_header_set_sync_in_progress(FOCAL_APP_HEADER(fm->header), FALSE);
-		reminder_sync_notifications(fm->calendars);
 	}
 }
-
-static void initial_calendar_sync_done(FocalApp* fm, Calendar* cal)
-{
-	g_signal_handlers_disconnect_by_func(cal, initial_calendar_sync_done, fm);
-	// We don't connect sync-done here, instead disconnect and reattach each time a sync happens.
-	// While less efficient, this prevents messing up our state when we get unexpected extra sync-done
-	// events triggered by e.g. WeekView when the date range changes. TODO a better way could be to tag
-	// each calendar with whether we are are expecting a sync-done, and remove the running_syncs counter.
-
-	fm->calendars = g_slist_append(fm->calendars, cal);
-	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
-}
-
-static void create_calendars(FocalApp* fm)
-{
-	for (GSList* p = fm->accounts; p; p = p->next) {
-		CalendarConfig* cfg = p->data;
-		Calendar* cal = calendar_create(cfg);
-		g_signal_connect_swapped(cal, "config-modified", (GCallback) calendar_config_modified, fm);
-		// Perform initial sync once, before connecting too many signals. This means for example,
-		// the week view won't be inundanted with event-updated signals.
-		// TODO how to free or try again if the initial sync fails?
-		g_signal_connect_swapped(cal, "sync-done", G_CALLBACK(initial_calendar_sync_done), fm);
-		calendar_sync(cal);
-
-		char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(cal));
-		GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
-		g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
-		g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
-		g_free(action_name);
-	}
-}
-
 static GMenu* create_menu(FocalApp* fm)
 {
 	GMenu* menu_main = g_menu_new();
-	GMenu* menu_calanders = g_menu_new();
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		Calendar* cal = FOCAL_CALENDAR(p->data);
-		char* action_name = g_strdup_printf("win.toggle-calendar.%s", calendar_get_name(cal));
-		g_menu_append(menu_calanders, calendar_get_name(cal), action_name);
-		g_free(action_name);
-	}
-
-	g_menu_append_section(menu_main, NULL, G_MENU_MODEL(menu_calanders));
+	g_menu_append_section(menu_main, NULL, G_MENU_MODEL(fm->calendars));
 	g_menu_append(menu_main, "Accounts", "win.accounts");
 	g_menu_append(menu_main, "Preferences", "win.prefs");
-
 	return menu_main;
 }
 
@@ -229,41 +173,24 @@ static gboolean do_calendar_sync(FocalApp* fm)
 	}
 
 	app_header_set_sync_in_progress(FOCAL_APP_HEADER(fm->header), TRUE);
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		Calendar* cal = FOCAL_CALENDAR(p->data);
-		fm->running_syncs++;
-
-		g_signal_connect_swapped(cal, "sync-done", (GCallback) calendar_synced, fm);
-		calendar_sync(cal);
-	}
+	fm->running_syncs = g_menu_model_get_n_items(G_MENU_MODEL(fm->calendars));
+	calendar_collection_sync_all(fm->calendars);
 	return G_SOURCE_CONTINUE;
 }
 
-static void on_accounts_changed(GtkWidget* accounts, GSList* new_config, gpointer user_data)
+static void on_accounts_changed(FocalApp* fm)
 {
-	FocalApp* fm = (FocalApp*) user_data;
-	// remove all calendars from view and remove window action
-	for (GSList* p = fm->calendars; p; p = p->next) {
-		week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), p->data);
-		char* action_name = g_strdup_printf("win.toggle-calendar.%s", calendar_get_name(p->data));
-		g_action_map_remove_action(G_ACTION_MAP(fm->mainWindow), action_name);
-		g_free(action_name);
-	}
-	// free all calendars and configs
-	g_slist_free_full(fm->calendars, g_object_unref);
-	fm->calendars = NULL;
-	// write new config back to file
-	calendar_config_write_to_file(fm->path_accounts, new_config);
-	// recreate calendars from new config
-	fm->accounts = new_config;
-	create_calendars(fm);
+	// write modified config back to file
+	calendar_config_write_to_file(fm->path_accounts, fm->accounts);
+	// recreate calendars from updated config
+	calendar_collection_populate_from_config(fm->calendars, fm->accounts);
 }
 
 static void open_accounts_dialog(GSimpleAction* simple, GVariant* parameter, gpointer user_data)
 {
 	FocalApp* fm = (FocalApp*) user_data;
-	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), fm->accounts);
-	g_signal_connect(accounts, "accounts-changed", (GCallback) on_accounts_changed, fm);
+	GtkWidget* accounts = accounts_dialog_new(GTK_WINDOW(fm->mainWindow), &fm->accounts);
+	g_signal_connect_swapped(accounts, "accounts-changed", (GCallback) on_accounts_changed, fm);
 	g_signal_connect(accounts, "response", G_CALLBACK(gtk_widget_destroy), NULL);
 	gtk_widget_show_all(accounts);
 }
@@ -346,9 +273,6 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	fm->weekView = week_view_new();
 	fm->eventDetail = g_object_new(FOCAL_TYPE_EVENT_PANEL, NULL);
 
-	// todo: better separation of ui from calendar models?
-	create_calendars(fm);
-
 	const GActionEntry entries[] = {
 		{"accounts", open_accounts_dialog},
 		{"prefs", open_prefs_dialog}};
@@ -356,6 +280,7 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	g_action_map_add_action_entries(G_ACTION_MAP(fm->mainWindow), entries, G_N_ELEMENTS(entries), fm);
 
 	fm->popover = g_object_new(FOCAL_TYPE_EVENT_POPUP, "relative-to", fm->weekView, NULL);
+	event_popup_set_calendar_collection(FOCAL_EVENT_POPUP(fm->popover), fm->calendars);
 	gtk_popover_set_position(GTK_POPOVER(fm->popover), GTK_POS_RIGHT);
 	gtk_widget_show_all(fm->eventDetail);
 
@@ -413,6 +338,9 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	gtk_widget_show_all(fm->mainWindow);
 
 	app_header_set_event(FOCAL_APP_HEADER(fm->header), NULL);
+
+	// todo: better separation of ui from calendar models?
+	calendar_collection_populate_from_config(fm->calendars, fm->accounts);
 }
 
 static void load_preferences(const char* filename, FocalPrefs* out)
@@ -437,13 +365,30 @@ static void load_preferences(const char* filename, FocalPrefs* out)
 	g_key_file_free(kf);
 }
 
+static void calendar_added(FocalApp* fm, Calendar* cal)
+{
+	week_view_add_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
+	char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(cal));
+	GSimpleAction* a = g_simple_action_new_stateful(action_name, NULL, g_variant_new_boolean(TRUE));
+	g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
+	g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
+	g_free(action_name);
+}
+
+static void calendar_removed(FocalApp* fm, Calendar* cal)
+{
+	week_view_remove_calendar(FOCAL_WEEK_VIEW(fm->weekView), cal);
+	char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(cal));
+	g_action_map_remove_action(G_ACTION_MAP(fm->mainWindow), action_name);
+	g_free(action_name);
+}
+
 static void focal_startup(GApplication* app)
 {
 	// needed to generate unique uuids for new events
 	g_random_set_seed(time(NULL) * getpid());
 
 	async_curl_init();
-	reminder_init();
 
 	FocalApp* fm = FOCAL_APP(app);
 
@@ -455,6 +400,14 @@ static void focal_startup(GApplication* app)
 
 	fm->accounts = calendar_config_load_from_file(fm->path_accounts);
 	load_preferences(fm->path_prefs, &fm->prefs);
+
+	fm->calendars = calendar_collection_new();
+	g_signal_connect_swapped(fm->calendars, "calendar-added", (GCallback) calendar_added, fm);
+	g_signal_connect_swapped(fm->calendars, "calendar-removed", (GCallback) calendar_removed, fm);
+	g_signal_connect_swapped(fm->calendars, "sync-done", (GCallback) calendar_synced, fm);
+	g_signal_connect_swapped(fm->calendars, "config-changed", (GCallback) calendar_config_modified, fm);
+
+	reminder_init(fm->calendars);
 
 	g_application_activate(app);
 }
@@ -471,7 +424,7 @@ static void focal_shutdown(GApplication* app)
 
 	if (fm->sync_timer_id)
 		g_source_remove(fm->sync_timer_id);
-	g_slist_free_full(fm->calendars, g_object_unref);
+	g_object_unref(fm->calendars);
 	g_slist_free_full(fm->accounts, (GDestroyNotify) calendar_config_free);
 	g_free(fm->path_accounts);
 	g_free(fm->path_prefs);

@@ -60,16 +60,21 @@ static void write_ical_to_disk(IcsCalendar* ic)
 static void save_event(Calendar* c, Event* event)
 {
 	IcsCalendar* lc = FOCAL_ICS_CALENDAR(c);
+	Event* old_event = g_hash_table_lookup(lc->events, event_get_uid(event));
 
-	if (!g_hash_table_lookup(lc->events, event_get_uid(event))) {
+	if (!old_event)
 		g_hash_table_insert(lc->events, g_strdup(event_get_uid(event)), event);
-	}
+
+	g_signal_emit_by_name(lc, "event-updated", old_event, event);
+
 	write_ical_to_disk(lc);
 }
 
 static void delete_event(Calendar* c, Event* event)
 {
 	IcsCalendar* lc = FOCAL_ICS_CALENDAR(c);
+	g_signal_emit_by_name(lc, "event-updated", event, NULL);
+
 	g_hash_table_remove(lc->events, event_get_uid(event)); // calls event_free
 	write_ical_to_disk(lc);
 }
@@ -228,7 +233,7 @@ Calendar* ics_calendar_new(const char* path)
 	IcsCalendar* lc = g_object_new(ICS_CALENDAR_TYPE, NULL);
 	lc->path = g_strdup(path);
 	lc->file = g_file_new_for_uri(lc->path);
-	lc->events = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify) event_free);
+	lc->events = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_object_unref);
 	g_assert_nonnull(lc->events);
 	return (Calendar*) lc;
 }

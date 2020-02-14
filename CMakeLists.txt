@@ -59,6 +59,7 @@ add_executable(${PROJECT_NAME}
 	src/async-curl.c
 	src/caldav-calendar.c
 	src/calendar.c
+	src/calendar-collection.c
 	src/calendar-config.c
 	src/cell-renderer-attendee-action.c
 	src/cell-renderer-attendee-partstat.c
@@ -68,6 +69,7 @@ add_executable(${PROJECT_NAME}
 	src/event-popup.c
 	src/ics-calendar.c
 	src/main.c
+	src/memory-calendar.c
 	src/oauth2-provider.c
 	src/oauth2-provider-google.c
 	src/oauth2-provider-outlook.c

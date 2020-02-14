@@ -20,6 +20,9 @@
 G_DECLARE_FINAL_TYPE(EventPopup, event_popup, FOCAL, EVENT_POPUP, GtkPopover)
 
 typedef struct _Event Event;
+typedef struct _CalendarCollection CalendarCollection;
+
+void event_popup_set_calendar_collection(EventPopup* ep, CalendarCollection* cc);
 
 void event_popup_set_event(EventPopup* ep, Event* ev);
 

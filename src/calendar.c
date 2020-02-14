@@ -121,7 +121,7 @@ const CalendarConfig* calendar_get_config(Calendar* self)
 const char* calendar_get_name(Calendar* self)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
-	return priv->config->label;
+	return priv->config ? priv->config->label : NULL;
 }
 
 const char* calendar_get_email(Calendar* self)

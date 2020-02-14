@@ -106,7 +106,4 @@ char* event_as_ical_string(Event* ev);
 // TODO: does this mean calendar_save_event should be called ONLY from here?
 void event_save(Event* ev);
 
-// Frees the event and all its owned data members
-void event_free(Event* ev);
-
 #endif // EVENT_H

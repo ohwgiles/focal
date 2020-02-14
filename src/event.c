@@ -149,7 +149,6 @@ icaltimetype event_get_alarm_time(Event* ev)
 
 void event_set_calendar(Event* ev, Calendar* cal)
 {
-	g_assert_null(ev->cal);
 	ev->cal = cal;
 }
 
@@ -332,8 +331,22 @@ static void event_init(Event* e)
 {
 }
 
+static void finalize(GObject* obj)
+{
+	Event* ev = FOCAL_EVENT(obj);
+	icalcomponent* parent = icalcomponent_get_parent(ev->cmp);
+	if (parent)
+		icalcomponent_free(parent);
+	else
+		icalcomponent_free(ev->cmp);
+	g_free(ev->etag);
+	g_free(ev->url);
+	G_OBJECT_CLASS(event_parent_class)->finalize(obj);
+}
+
 static void event_class_init(EventClass* e)
 {
+	G_OBJECT_CLASS(e)->finalize = finalize;
 }
 
 Event* event_new_from_ics_file(const char* path)
@@ -418,14 +431,3 @@ void event_save(Event* ev)
 	ev->dirty = FALSE;
 }
 
-void event_free(Event* ev)
-{
-	icalcomponent* parent = icalcomponent_get_parent(ev->cmp);
-	if (parent)
-		icalcomponent_free(parent);
-	else
-		icalcomponent_free(ev->cmp);
-	g_free(ev->etag);
-	g_free(ev->url);
-	g_object_unref(ev);
-}

@@ -1,7 +1,7 @@
 /*
  * week-view.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2019 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "memory-calendar.h"
 #include "week-view.h"
 
 struct _EventWidget {
@@ -65,6 +66,7 @@ struct _WeekView {
 		int week; // 1-based, note libical is 0-based
 		int year;
 	} now;
+	Calendar* unsaved_events;
 };
 
 // Documentative typedef representing an index into WeekView.events_week.
@@ -124,9 +126,11 @@ static dayindex dayindex_from_icaltime(WeekView* wv, icaltimetype dt)
 	return (ical_dow - ICAL_SUNDAY_WEEKDAY - wv->weekday_start + 7) % 7;
 }
 
-static void draw_event(cairo_t* cr, Event* tmp, PangoLayout* layout, double x, double y, int width, int height)
+static void draw_event(WeekView* wv, cairo_t* cr, Event* tmp, PangoLayout* layout, double x, double y, int width, int height)
 {
-	GdkRGBA* color = event_get_color(tmp);
+	static GdkRGBA grey = {0.7, 0.7, 0.7, 0.85};
+
+	GdkRGBA* color = event_get_calendar(tmp) == wv->unsaved_events ? &grey : event_get_color(tmp);
 	cairo_set_source_rgba(cr, color->red, color->green, color->blue, color->alpha - (event_get_dirty(tmp) ? 0.3 : 0.0));
 	cairo_rectangle(cr, x + 1, y + 1, width - 2, height - 2);
 	cairo_fill(cr);
@@ -198,7 +202,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	for (int d = 0; d < num_days; ++d) {
 		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
 			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
-			draw_event(cr, tmp->ev, layout,
+			draw_event(wv, cr, tmp->ev, layout,
 					   wv->x + SIDEBAR_WIDTH + d * day_width,
 					   tmp->minutes_from * yminutescale + wv->y + day_begin_yoffset - (int) wv->scroll_pos,
 					   day_width,
@@ -224,7 +228,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	// all-day events
 	for (int d = 0; d < num_days; ++d) {
 		for (EventWidget* tmp = wv->events_allday[d]; tmp; tmp = tmp->next) {
-			draw_event(cr, tmp->ev, layout,
+			draw_event(wv, cr, tmp->ev, layout,
 					   wv->x + SIDEBAR_WIDTH + d * day_width,
 					   wv->y + HEADER_HEIGHT,
 					   day_width,
@@ -362,9 +366,9 @@ static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointe
 		Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
 
 		/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
-		event_set_calendar(ev, wv->calendars->data);
+		event_set_calendar(ev, wv->unsaved_events);
+		event_save(ev);
 
-		week_view_add_event(wv, ev);
 		gtk_widget_queue_draw((GtkWidget*) wv);
 		wv->current_selection = ev;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
@@ -450,6 +454,7 @@ static void week_view_finalize(GObject* gobject)
 	icaltimezone_free(wv->current_tz, TRUE);
 	g_slist_free(wv->calendars);
 	clear_all_events(wv);
+	g_object_unref(wv->unsaved_events);
 }
 
 static void week_view_class_init(WeekViewClass* klass)
@@ -565,7 +570,6 @@ static void display_week_year(WeekView* wv, icaltimetype tt, int* out_week, int*
 	int week = week_number_iso8601(tt);
 	int year = tt.year;
 
-	printf("%d %d %d\n", week, wv->weekday_start, icaltime_day_of_week(tt));
 	if (wv->weekday_start == 0 && icaltime_day_of_week(tt) == ICAL_SUNDAY_WEEKDAY)
 		week++;
 
@@ -586,6 +590,10 @@ static void update_current_time(WeekView* wv)
 	wv->now.minutes = 60 * today.hour + today.minute;
 	wv->now.weekday = icaltime_day_of_week(today) - ICAL_SUNDAY_WEEKDAY;
 	display_week_year(wv, today, &wv->now.week, &wv->now.year);
+	//if(wv->now.week > weeks_in_year_iso8601(wv->now.year)) {
+	//	wv->now.week = 1;
+	//	wv->now.year++;
+	//}
 }
 
 static gboolean timer_update_current_time(gpointer user_data)
@@ -644,6 +652,9 @@ GtkWidget* week_view_new(void)
 
 	cw->current_selection = NULL;
 
+	cw->unsaved_events = memory_calendar_new();
+	week_view_add_calendar(cw, cw->unsaved_events);
+
 	return (GtkWidget*) cw;
 }
 
@@ -678,6 +689,7 @@ static void add_event_from_calendar(gpointer user_data, Event* ev)
 
 void week_view_add_event(WeekView* wv, Event* vevent)
 {
+	// TODO check if there is no owning calendar and make it unsaved if so
 	add_event_from_calendar(wv, vevent);
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
@@ -710,8 +722,6 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 
 static void calendar_event_updated(WeekView* wv, Event* old_event, Event* new_event, Calendar* cal)
 {
-	printf("calendar_event_updated\n");
-
 	// all references to old_event are about to become invalid
 	if (old_event) {
 		week_view_remove_event(wv, old_event);
@@ -719,14 +729,6 @@ static void calendar_event_updated(WeekView* wv, Event* old_event, Event* new_ev
 	if (new_event) {
 		week_view_add_event(wv, new_event);
 	}
-}
-
-void week_view_add_calendar(WeekView* wv, Calendar* cal)
-{
-	wv->calendars = g_slist_append(wv->calendars, cal);
-	calendar_each_event(cal, add_event_from_calendar, wv);
-	g_signal_connect_swapped(cal, "event-updated", G_CALLBACK(calendar_event_updated), wv);
-	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
 int week_view_get_week(WeekView* wv)
@@ -754,9 +756,19 @@ static void week_view_populate_view(WeekView* wv)
 	gtk_widget_queue_draw((GtkWidget*) wv);
 }
 
+void week_view_add_calendar(WeekView* wv, Calendar* cal)
+{
+	wv->calendars = g_slist_append(wv->calendars, cal);
+	g_signal_connect_swapped(cal, "event-updated", G_CALLBACK(calendar_event_updated), wv);
+	calendar_each_event(cal, add_event_from_calendar, wv);
+	//week_view_populate_view(wv);
+	gtk_widget_queue_draw((GtkWidget*) wv);
+	calendar_sync_date_range(cal, wv->current_view);
+}
+
 void week_view_remove_calendar(WeekView* wv, Calendar* cal)
 {
-	g_signal_handlers_disconnect_by_func(cal, G_CALLBACK(calendar_event_updated), wv);
+	g_signal_handlers_disconnect_by_data(cal, wv);
 	wv->calendars = g_slist_remove(wv->calendars, cal);
 	week_view_populate_view(wv);
 }

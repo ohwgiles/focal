@@ -110,7 +110,8 @@ static void update_current_time()
 
 static void notification_mark_unknown(gpointer key, gpointer value, gpointer user_data)
 {
-	((Reminder*) value)->known = FALSE;
+	if (((Calendar*) user_data) == event_get_calendar(((Reminder*) value)->event))
+		((Reminder*) value)->known = FALSE;
 }
 
 static gboolean notification_is_unknown(gpointer key, gpointer value, gpointer user_data)
@@ -126,7 +127,17 @@ static void notification_free(Reminder* rem)
 	g_free(rem);
 }
 
-void reminder_init(void)
+static void update_notifications(CalendarCollection* cc, Calendar* c)
+{
+	g_assert_nonnull(reminders);
+	update_current_time();
+
+	g_hash_table_foreach(reminders, notification_mark_unknown, c);
+	calendar_each_event(c, check_event_add_notification, NULL);
+	g_hash_table_foreach_remove(reminders, notification_is_unknown, NULL);
+}
+
+void reminder_init(CalendarCollection* cc)
 {
 	g_assert_null(current_tz);
 	g_assert_null(reminders);
@@ -138,18 +149,12 @@ void reminder_init(void)
 	update_current_time();
 
 	reminders = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify) notification_free);
+
+	g_signal_connect(cc, "sync-done", (GCallback) update_notifications, NULL);
 }
 
 void reminder_sync_notifications(GSList* calendars)
 {
-	g_assert_nonnull(reminders);
-	update_current_time();
-
-	g_hash_table_foreach(reminders, notification_mark_unknown, NULL);
-	for (GSList* p = calendars; p; p = p->next) {
-		calendar_each_event(p->data, check_event_add_notification, NULL);
-	}
-	g_hash_table_foreach_remove(reminders, notification_is_unknown, NULL);
 }
 
 void reminder_cleanup(void)

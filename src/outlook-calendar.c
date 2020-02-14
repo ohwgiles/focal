@@ -643,7 +643,7 @@ Calendar* outlook_calendar_new(CalendarConfig* cfg)
 {
 	OutlookCalendar* oc = g_object_new(OUTLOOK_CALENDAR_TYPE, "auth", g_object_new(REMOTE_AUTH_OAUTH2_TYPE, "cfg", cfg, "provider", g_object_new(TYPE_OAUTH2_PROVIDER_OUTLOOK, NULL), NULL), NULL);
 	oc->cfg = cfg;
-	oc->events = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, (GDestroyNotify) event_free);
+	oc->events = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_object_unref);
 	oc->sync_url = NULL;
 
 	// TODO: error handling

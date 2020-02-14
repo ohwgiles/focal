@@ -16,7 +16,9 @@
 
 #include <gtk/gtk.h>
 
-void reminder_init(void);
+typedef struct _CalendarCollection CalendarCollection;
+
+void reminder_init(CalendarCollection* cc);
 
 // Set up timers for all events in the passed list of calendars
 // which will occur soon. This method should be called every time

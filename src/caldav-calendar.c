@@ -250,6 +250,9 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 			ac->cal->events = g_slist_append(ac->cal->events, ac->new_event);
 
 		g_signal_emit_by_name(ac->cal, "event-updated", ac->old_event, ac->new_event);
+
+		if (ac->old_event && ac->old_event != ac->new_event)
+			g_object_unref(ac->old_event);
 	} else {
 		// TODO report error via UI
 		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
@@ -387,7 +390,7 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 
 static void free_events(CaldavCalendar* rc)
 {
-	g_slist_free_full(rc->events, (GDestroyNotify) event_free);
+	g_slist_free_full(rc->events, (GDestroyNotify) g_object_unref);
 }
 
 static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde)
@@ -475,7 +478,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 						// notify anyone using the old event that it's about to disappear
 						g_signal_emit_by_name(rc, "event-updated", (*p)->data, updated_event);
 						// replace the old event with the new one
-						event_free((*p)->data);
+						g_object_unref((*p)->data);
 						(*p)->data = updated_event;
 						nUpdated++;
 					}
@@ -485,7 +488,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 					// before the response to this multiget. Notify anyone using the event
 					// that it's about to disappear.
 					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
-					event_free((*p)->data);
+					g_object_unref((*p)->data);
 					*p = (*p)->next;
 					caldav_entry_free(cde);
 				}
@@ -630,7 +633,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 				Event* ee = (Event*) (*p)->data;
 				if (strcmp(se->href, event_get_url(ee)) == 0) {
 					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
-					event_free((*p)->data);
+					g_object_unref((*p)->data);
 					*p = (*p)->next;
 					nDeleted++;
 					break;
