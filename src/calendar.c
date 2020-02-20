@@ -1,7 +1,7 @@
 /*
  * calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -20,6 +20,7 @@ typedef struct {
 	const CalendarConfig* config;
 	RemoteAuth* auth;
 	GdkRGBA color;
+	char* error_message;
 } CalendarPrivate;
 
 G_DEFINE_TYPE_WITH_PRIVATE(Calendar, calendar, G_TYPE_OBJECT)
@@ -29,6 +30,7 @@ enum {
 	SIGNAL_EVENT_UPDATED,
 	SIGNAL_REQUEST_PASSWORD,
 	SIGNAL_CONFIG_MODIFIED,
+	SIGNAL_ERROR,
 	LAST_SIGNAL
 };
 
@@ -43,11 +45,13 @@ enum {
 
 void calendar_save_event(Calendar* self, Event* event)
 {
+	_calendar_clear_error(self);
 	FOCAL_CALENDAR_GET_CLASS(self)->save_event(self, event);
 }
 
 void calendar_delete_event(Calendar* self, Event* event)
 {
+	_calendar_clear_error(self);
 	FOCAL_CALENDAR_GET_CLASS(self)->delete_event(self, event);
 }
 
@@ -58,6 +62,7 @@ void calendar_each_event(Calendar* self, CalendarEachEventCallback callback, voi
 
 void calendar_sync(Calendar* self)
 {
+	_calendar_clear_error(self);
 	FOCAL_CALENDAR_GET_CLASS(self)->sync(self);
 }
 
@@ -69,8 +74,10 @@ gboolean calendar_is_read_only(Calendar* self)
 void calendar_sync_date_range(Calendar* self, icaltime_span range)
 {
 	CalendarClass* cc = FOCAL_CALENDAR_GET_CLASS(self);
-	if (cc->sync_date_range)
+	if (cc->sync_date_range) {
+		_calendar_clear_error(self);
 		cc->sync_date_range(self, range);
+	}
 }
 
 static void on_config_modified(Calendar* self)
@@ -98,11 +105,12 @@ static void set_property(GObject* object, guint prop_id, const GValue* value, GP
 void calendar_class_init(CalendarClass* klass)
 {
 	GObjectClass* goc = (GObjectClass*) klass;
-	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	calendar_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_BOOLEAN);
 	calendar_signals[SIGNAL_EVENT_UPDATED] = g_signal_new("event-updated", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 	// TODO: learn how to use G_TYPE_STRING in return value properly...
 	calendar_signals[SIGNAL_REQUEST_PASSWORD] = g_signal_new("request-password", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 2, G_TYPE_POINTER, G_TYPE_POINTER);
 	calendar_signals[SIGNAL_CONFIG_MODIFIED] = g_signal_new("config-modified", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+	calendar_signals[SIGNAL_ERROR] = g_signal_new("error", G_TYPE_FROM_CLASS(goc), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	goc->set_property = set_property;
 	g_object_class_install_property(goc, PROP_CALENDAR_CONFIG, g_param_spec_pointer("cfg", "Calendar Configuration", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
 	g_object_class_install_property(goc, PROP_REMOTE_AUTH, g_param_spec_pointer("auth", "Remote Authenticator", "", G_PARAM_WRITABLE | G_PARAM_CONSTRUCT_ONLY));
@@ -140,6 +148,32 @@ const char* calendar_get_location(Calendar* self)
 {
 	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
 	return priv->config->location;
+}
+
+char* calendar_get_error(Calendar* self)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	return priv->error_message;
+}
+
+void _calendar_error(Calendar* self, const char* fmt, ...)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	free(priv->error_message);
+
+	va_list ap;
+	va_start(ap, fmt);
+	vasprintf(&priv->error_message, fmt, ap);
+	va_end(ap);
+
+	g_signal_emit(self, calendar_signals[SIGNAL_ERROR], 0);
+}
+
+void _calendar_clear_error(Calendar* self)
+{
+	CalendarPrivate* priv = (CalendarPrivate*) calendar_get_instance_private(self);
+	free(priv->error_message);
+	priv->error_message = NULL;
 }
 
 #include "caldav-calendar.h"

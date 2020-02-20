@@ -1,7 +1,7 @@
 /*
  * ics-calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -53,7 +53,7 @@ static void write_ical_to_disk(IcsCalendar* ic)
 		g_critical("Failed to save to %s: %s", ic->path, err->message);
 		g_error_free(err);
 	} else {
-		g_signal_emit_by_name(ic, "sync-done", 0);
+		g_signal_emit_by_name(ic, "sync-done", TRUE, 0);
 	}
 }
 
@@ -145,7 +145,7 @@ static void sync_done(IcsCalendar* ic, const GString* data)
 		}
 	}
 
-	g_signal_emit_by_name(ic, "sync-done", 0);
+	g_signal_emit_by_name(ic, "sync-done", TRUE, 0);
 }
 
 typedef struct {
@@ -205,8 +205,9 @@ static void ics_calendar_sync(Calendar* c)
 
 	g_file_read_async(ic->file, G_PRIORITY_DEFAULT, NULL, file_read_done, ic);
 	if (err) {
-		g_critical("Could not open %s for reading: %s\n", ic->path, err->message);
 		g_object_unref(ic->file);
+		_calendar_error(c, "Could not open %s for reading: %s", ic->path, err->message);
+		g_signal_emit_by_name(ic, "sync-done", FALSE, 0);
 		return;
 	}
 }

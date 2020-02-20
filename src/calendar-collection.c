@@ -1,7 +1,7 @@
 /*
  * calendar-collection.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2019 Oliver Giles and focal contributors.
+ * Copyright 2019-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -197,7 +197,7 @@ static void calendar_collection_class_init(CalendarCollectionClass* ccc)
 	calendar_collection_signals[SIGNAL_CONFIG_CHANGED] = g_signal_new("config-changed", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 	calendar_collection_signals[SIGNAL_CALENDAR_ADDED] = g_signal_new("calendar-added", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
 	calendar_collection_signals[SIGNAL_CALENDAR_REMOVED] = g_signal_new("calendar-removed", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
-	calendar_collection_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	calendar_collection_signals[SIGNAL_SYNC_DONE] = g_signal_new("sync-done", G_TYPE_FROM_CLASS(object_class), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_BOOLEAN, G_TYPE_POINTER);
 }
 
 static void calendar_collection_init(CalendarCollection* cc)
@@ -232,12 +232,12 @@ static gint calendar_item_from_calendar(CalendarItem* item, Calendar* cal)
 	return item->calendar == cal ? 0 : 1;
 }
 
-static void on_calendar_sync_done(CalendarCollection* cc, Calendar* cal)
+static void on_calendar_sync_done(CalendarCollection* cc, gboolean success, Calendar* cal)
 {
-	g_signal_emit(cc, calendar_collection_signals[SIGNAL_SYNC_DONE], 0, cal);
+	g_signal_emit(cc, calendar_collection_signals[SIGNAL_SYNC_DONE], 0, success, cal);
 }
 
-static void on_calendar_initial_sync_done(CalendarCollection* cc, Calendar* cal)
+static void on_calendar_initial_sync_done(CalendarCollection* cc, gboolean success, Calendar* cal)
 {
 	g_signal_handlers_disconnect_by_func(cal, (gpointer) on_calendar_initial_sync_done, cc);
 
@@ -247,8 +247,11 @@ static void on_calendar_initial_sync_done(CalendarCollection* cc, Calendar* cal)
 	CalendarItem* item = (CalendarItem*) el->data;
 	item->initial_sync_done = TRUE;
 
+	// Whether the initial sync succeeded or not is ignored. This is imperfect because if it later
+	// succeeds, the WeekView might get a *large* number of event-updated signals.
+	// In conjunction with this, FocalApp needs to check if there are any errors when a calendar is
+	// added to the collection (and not just when it receives an error signal)
 	g_signal_connect_swapped(cal, "sync-done", (GCallback) on_calendar_sync_done, cc);
-
 	g_signal_emit(cc, calendar_collection_signals[SIGNAL_CALENDAR_ADDED], 0, cal);
 }
 
@@ -275,7 +278,6 @@ void calendar_collection_populate_from_config(CalendarCollection* cc, GSList* co
 		// Perform initial sync once, before signalling calendar-added. This means for example,
 		// the calendar won't be added to the week view before the initial sync, which would have
 		// caused it to be inundanted with event-updated signals.
-		// TODO how to free or try again if the initial sync fails?
 		g_signal_connect_swapped(cal, "sync-done", G_CALLBACK(on_calendar_initial_sync_done), cc);
 		calendar_sync(cal);
 	}
@@ -298,7 +300,7 @@ CalendarCollectionIterator calendar_collection_iterator(CalendarCollection* cc, 
 	it.flags = flags;
 
 	it.priv = (flags & CALENDAR_COLLECTION_ITERATOR_FLAGS_ONLY_VISIBLE) ? g_slist_find_custom(cc->items, NULL, (GCompareFunc) is_enabled) : cc->items;
-	it.cal = cc->items ? cc->items->data : NULL;
+	it.cal = cc->items ? ((CalendarItem*) cc->items->data)->calendar : NULL;
 
 	return it;
 }
@@ -306,7 +308,7 @@ CalendarCollectionIterator calendar_collection_iterator(CalendarCollection* cc, 
 void calendar_collection_iterator_next(CalendarCollectionIterator* cci)
 {
 	cci->priv = (cci->flags & CALENDAR_COLLECTION_ITERATOR_FLAGS_ONLY_VISIBLE) ? g_slist_find_custom(cci->priv, NULL, (GCompareFunc) is_enabled) : ((GSList*) cci->priv)->next;
-	cci->cal = cci->priv ? ((GSList*) cci->priv)->data : NULL;
+	cci->cal = cci->priv ? ((CalendarItem*) ((GSList*) cci->priv)->data)->calendar : NULL;
 }
 
 enum ModelFilterFlags {

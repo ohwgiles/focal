@@ -1,7 +1,7 @@
 /*
  * reminder.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -127,8 +127,11 @@ static void notification_free(Reminder* rem)
 	g_free(rem);
 }
 
-static void update_notifications(CalendarCollection* cc, Calendar* c)
+static void update_notifications(CalendarCollection* cc, gboolean success, Calendar* c)
 {
+	if (!success)
+		return;
+
 	g_assert_nonnull(reminders);
 	update_current_time();
 

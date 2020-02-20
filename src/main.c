@@ -1,7 +1,7 @@
 /*
  * main.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -49,6 +49,8 @@ struct _FocalApp {
 	//GSList* calendars;
 	CalendarCollection* calendars;
 	GtkWidget* weekView;
+	GtkWidget* error_label;
+	GtkWidget* infoBar;
 	GtkWidget* popover;
 	GtkWidget* eventDetail;
 	GtkWidget* revealer;
@@ -266,6 +268,38 @@ static void workaround_sync_event_detail_with_week_view(GtkWidget* event_panel, 
 	gtk_widget_set_size_request(event_panel, allocation->width, allocation->height);
 }
 
+static void handle_calendar_error(FocalApp* fm, Calendar* cal)
+{
+	char* msg = calendar_get_error(cal);
+	g_assert_nonnull(msg);
+
+	// hacky: save a pointer to the calendar whose error is shown now. This is so that
+	// when the warning is dismissed and we check to see whether to display errors from
+	// other calendars, we know to exclude this one.
+	g_object_set_data((GObject*) fm->infoBar, "from-calendar", cal);
+
+	msg = g_strdup_printf("<b>%s</b>: %s", calendar_get_name(cal), msg);
+	gtk_label_set_markup(GTK_LABEL(fm->error_label), msg);
+	g_free(msg);
+	gtk_widget_show(fm->infoBar);
+}
+
+static void handle_info_bar_dismissed(FocalApp* fm)
+{
+	// hacky, see handle_calendar_error
+	Calendar* error_from = g_object_get_data((GObject*) fm->infoBar, "from-calendar");
+
+	// show any errors from other calendars
+	calendar_collection_foreach (it, fm->calendars) {
+		if (it.cal != error_from && calendar_get_error(it.cal)) {
+			handle_calendar_error(fm, it.cal);
+			return;
+		}
+	}
+	// otherwise hide the bar
+	gtk_widget_hide(fm->infoBar);
+}
+
 static void focal_create_main_window(GApplication* app, FocalApp* fm)
 {
 	fm->mainWindow = gtk_application_window_new(GTK_APPLICATION(app));
@@ -302,6 +336,14 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	gtk_window_set_titlebar(GTK_WINDOW(fm->mainWindow), fm->header);
 
+	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+
+	fm->error_label = g_object_new(GTK_TYPE_LABEL, "use-markup", TRUE, 0);
+	fm->infoBar = g_object_new(GTK_TYPE_INFO_BAR, "message-type", GTK_MESSAGE_WARNING, "show-close-button", TRUE, 0);
+	g_signal_connect_swapped(fm->infoBar, "response", (GCallback) handle_info_bar_dismissed, fm);
+
+	gtk_container_add(GTK_CONTAINER(gtk_info_bar_get_content_area(GTK_INFO_BAR(fm->infoBar))), fm->error_label);
+
 	GtkWidget* overlay = gtk_overlay_new();
 	GtkWidget* sw = gtk_scrolled_window_new(NULL, NULL);
 
@@ -316,12 +358,16 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	g_signal_connect_swapped(fm->weekView, "size-allocate", (GCallback) workaround_sync_event_detail_with_week_view, fm->eventDetail);
 
 	// - GtkWindow
-	// `-- GtkOverlay
-	//  `- GtkScrolledWindow
-	//  |`- WeekView
-	//  `- GtkRevealer
-	//   `- EventDetails
-	gtk_container_add(GTK_CONTAINER(fm->mainWindow), overlay);
+	// `- GtkBox
+	//  `- GtkInfoBar
+	//  `- GtkOverlay
+	//   `- GtkScrolledWindow
+	//   |`- WeekView
+	//   `- GtkRevealer
+	//    `- EventDetails
+	gtk_container_add(GTK_CONTAINER(fm->mainWindow), box);
+	gtk_container_add(GTK_CONTAINER(box), fm->infoBar);
+	gtk_container_add(GTK_CONTAINER(box), overlay);
 	gtk_container_add(GTK_CONTAINER(overlay), sw);
 	gtk_container_add(GTK_CONTAINER(sw), fm->weekView);
 	gtk_overlay_add_overlay(GTK_OVERLAY(overlay), fm->revealer);
@@ -336,6 +382,7 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 	week_view_goto_current(FOCAL_WEEK_VIEW(fm->weekView));
 
 	gtk_widget_show_all(fm->mainWindow);
+	gtk_widget_hide(fm->infoBar);
 
 	app_header_set_event(FOCAL_APP_HEADER(fm->header), NULL);
 
@@ -373,6 +420,11 @@ static void calendar_added(FocalApp* fm, Calendar* cal)
 	g_signal_connect(a, "change-state", (GCallback) toggle_calendar, fm);
 	g_action_map_add_action(G_ACTION_MAP(fm->mainWindow), G_ACTION(a));
 	g_free(action_name);
+
+	g_signal_connect_swapped(cal, "error", (GCallback) handle_calendar_error, fm);
+	// The initial sync might already have an error
+	if (calendar_get_error(cal))
+		handle_calendar_error(fm, cal);
 }
 
 static void calendar_removed(FocalApp* fm, Calendar* cal)
@@ -381,6 +433,8 @@ static void calendar_removed(FocalApp* fm, Calendar* cal)
 	char* action_name = g_strdup_printf("toggle-calendar.%s", calendar_get_name(cal));
 	g_action_map_remove_action(G_ACTION_MAP(fm->mainWindow), action_name);
 	g_free(action_name);
+
+	g_signal_handlers_disconnect_by_data(cal, fm);
 }
 
 static void focal_startup(GApplication* app)

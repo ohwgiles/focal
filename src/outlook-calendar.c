@@ -1,7 +1,7 @@
 /*
  * outlook-calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018-2019 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -73,8 +73,7 @@ static void on_delete_complete(CURL* curl, CURLcode ret, void* user)
 	g_free(mc->url);
 
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(mc->oc), "Failed to delete event: %s", curl_easy_strerror(ret));
 		g_string_free(mc->put_response, TRUE);
 		free(mc);
 		return;
@@ -85,7 +84,7 @@ static void on_delete_complete(CURL* curl, CURLcode ret, void* user)
 	if (response_code == 204) {
 		g_hash_table_remove(mc->oc->events, event_get_url(mc->event)); // calls event_free
 		// reuse the sync-done event since for now the action is the same -> refresh the UI
-		g_signal_emit_by_name(mc->oc, "sync-done", 0);
+		g_signal_emit_by_name(mc->oc, "sync-done", TRUE, 0);
 	}
 
 	g_free(mc);
@@ -240,8 +239,7 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 	g_free(mc->payload);
 
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(oc), "Failed to create event: %s", curl_easy_strerror(ret));
 		g_string_free(mc->put_response, TRUE);
 		free(mc);
 		return;
@@ -273,7 +271,7 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 			g_hash_table_insert(mc->oc->events, g_strdup(event_get_url(mc->event)), mc->event);
 
 		// reuse the sync-done event since for now the action is the same -> refresh the UI
-		g_signal_emit_by_name(mc->oc, "sync-done", 0);
+		g_signal_emit_by_name(mc->oc, "sync-done", TRUE, 0);
 	}
 
 	g_string_free(mc->put_response, TRUE);
@@ -378,7 +376,7 @@ static void outlook_sync(Calendar* c)
 	// range has not been set yet with outlook_sync_date_range
 	if (!oc->sync_url) {
 		// Date range not yet set. Probably initial sync. Notify done so it will be added to the view. TODO cleaner way?
-		g_signal_emit_by_name(oc, "sync-done", 0);
+		g_signal_emit_by_name(oc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -454,10 +452,10 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	OutlookCalendar* oc = sc->oc;
 
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(oc), "Error syncing calendar: %s", curl_easy_strerror(ret));
 		g_string_free(sc->resp, TRUE);
 		free(sc);
+		g_signal_emit_by_name(oc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -557,7 +555,7 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 		g_slist_free_full(sc->recurrences, g_free);
 		g_string_free(sc->resp, TRUE);
 		g_free(sc);
-		g_signal_emit_by_name(oc, "sync-done", 0);
+		g_signal_emit_by_name(oc, "sync-done", TRUE, 0);
 	}
 	json_reader_end_member(reader);
 

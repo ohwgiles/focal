@@ -1,7 +1,7 @@
 /*
  * memory-calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -50,7 +50,7 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 
 static void sync_noop(Calendar* c)
 {
-	g_signal_emit_by_name(c, "sync-done", 0);
+	g_signal_emit_by_name(c, "sync-done", TRUE, 0);
 }
 
 static gboolean is_read_only(Calendar* c)

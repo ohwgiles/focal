@@ -1,7 +1,7 @@
 /*
  * calendar.h
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018-2019 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -63,6 +63,12 @@ const char* calendar_get_email(Calendar* self);
 GdkRGBA* calendar_get_color(Calendar* self);
 
 const char* calendar_get_location(Calendar* self);
+
+// Returns an error message to display to the user. Errors are triggered by calendar implementations using _calendar_error()
+char* calendar_get_error(Calendar* self);
+
+void _calendar_error(Calendar* self, const char* fmt, ...);
+void _calendar_clear_error(Calendar* self);
 
 // factory method
 Calendar* calendar_create(CalendarConfig* config);

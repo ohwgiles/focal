@@ -430,4 +430,3 @@ void event_save(Event* ev)
 	calendar_save_event(ev->cal, ev);
 	ev->dirty = FALSE;
 }
-

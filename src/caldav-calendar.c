@@ -1,7 +1,7 @@
 /*
  * caldav-calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -254,8 +254,7 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		if (ac->old_event && ac->old_event != ac->new_event)
 			g_object_unref(ac->old_event);
 	} else {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(ac), "Error modifying calendar: %s", curl_easy_strerror(ret));
 	}
 
 	ac->cal->op_pending = FALSE;
@@ -438,11 +437,11 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// Handle the case where the http request failed
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(rc), "Error syncing calendar: %s", curl_easy_strerror(ret));
 		sc->cal->op_pending = FALSE;
 		g_string_free(sc->report_resp, TRUE);
 		free(sc);
+		g_signal_emit_by_name(rc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -531,7 +530,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// All done, notify
 	rc->op_pending = FALSE;
-	g_signal_emit_by_name(rc, "sync-done", 0);
+	g_signal_emit_by_name(rc, "sync-done", TRUE, 0);
 }
 
 static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, GSList* hrefs)
@@ -590,11 +589,11 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// Handle the case where the http request failed
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(rc), "Error syncing calendar: %s", curl_easy_strerror(ret));
 		sc->cal->op_pending = FALSE;
 		g_string_free(sc->report_resp, TRUE);
 		free(sc);
+		g_signal_emit_by_name(rc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -657,7 +656,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		}
 		// sync-done here is necessary if items were deleted OR it's the initial sync.
 		// We know whether we deleted something but don't know if this is an initial sync.
-		g_signal_emit_by_name(rc, "sync-done", 0);
+		g_signal_emit_by_name(rc, "sync-done", TRUE, 0);
 		rc->op_pending = FALSE;
 		return;
 	}
