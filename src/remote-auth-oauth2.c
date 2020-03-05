@@ -294,6 +294,23 @@ static void remote_auth_oauth2_new_request(RemoteAuth* ra, void (*callback)(), v
 		launch_external_authentication(oa);
 }
 
+static void on_access_token_clear_complete(GObject* source, GAsyncResult* result, gpointer user)
+{
+	GError* error = NULL;
+	secret_password_clear_finish(result, &error);
+	RemoteAuthOAuth2* ba = (RemoteAuthOAuth2*) user;
+
+	if (error != NULL) {
+		g_critical("%s", error->message);
+		g_error_free(error);
+		g_free(ba->ctx);
+		ba->ctx = NULL;
+	} else {
+		// try to acquire a new access token using the refresh token
+		refresh_token_lookup(ba);
+	}
+}
+
 static void remote_auth_oauth2_invalidate_credential(RemoteAuth* ra, void (*callback)(), void* user, void* arg)
 {
 	RemoteAuthOAuth2* oa = FOCAL_REMOTE_AUTH_OAUTH2(ra);
@@ -303,9 +320,8 @@ static void remote_auth_oauth2_invalidate_credential(RemoteAuth* ra, void (*call
 	oa->ctx->callback = callback;
 	oa->ctx->user = user;
 	oa->ctx->arg = arg;
-	// remove the invalidated auth token from the store with the callback as
-	// if we were looking it up. In this case the refresh token will be queried
-	secret_password_clear(&focal_oauth2_schema, NULL, on_access_token_lookup_complete, ra,
+	// remove the invalidated auth token from the store. In the callback, request another.
+	secret_password_clear(&focal_oauth2_schema, NULL, on_access_token_clear_complete, ra,
 						  "type", "access",
 						  "email", oa->cfg->email,
 						  NULL);
