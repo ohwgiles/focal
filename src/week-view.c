@@ -24,6 +24,7 @@ struct _EventWidget {
 	Event* ev;
 	// cached time values for faster drawing
 	int minutes_from, minutes_to;
+	int new_dayindex; // redundant, but helps performant dragging between days
 	// list pointer
 	struct _EventWidget* next;
 };
@@ -67,6 +68,20 @@ struct _WeekView {
 		int year;
 	} now;
 	Calendar* unsaved_events;
+
+	enum { DRAG_ACTION_NONE,
+		   DRAG_ACTION_MOVE,
+		   DRAG_ACTION_RESIZE } drag_action;
+	enum { RESIZE_EDGE_NONE,
+		   RESIZE_EDGE_TOP,
+		   RESIZE_EDGE_BOTTOM } resize_edge;
+	gboolean double_click;
+	GdkCursor* resize_cursor;
+	EventWidget* hover_event;
+	struct {
+		double x, y;
+	} button_press_origin;
+	int button_press_minute_offset;
 };
 
 // Documentative typedef representing an index into WeekView.events_week.
@@ -203,7 +218,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 		for (EventWidget* tmp = wv->events_week[d]; tmp; tmp = tmp->next) {
 			const double yminutescale = HALFHOUR_HEIGHT / 30.0;
 			draw_event(wv, cr, tmp->ev, layout,
-					   wv->x + SIDEBAR_WIDTH + d * day_width,
+					   wv->x + SIDEBAR_WIDTH + tmp->new_dayindex * day_width,
 					   tmp->minutes_from * yminutescale + wv->y + day_begin_yoffset - (int) wv->scroll_pos,
 					   day_width,
 					   (tmp->minutes_to - tmp->minutes_from) * yminutescale);
@@ -229,7 +244,7 @@ static void week_view_draw(WeekView* wv, cairo_t* cr)
 	for (int d = 0; d < num_days; ++d) {
 		for (EventWidget* tmp = wv->events_allday[d]; tmp; tmp = tmp->next) {
 			draw_event(wv, cr, tmp->ev, layout,
-					   wv->x + SIDEBAR_WIDTH + d * day_width,
+					   wv->x + SIDEBAR_WIDTH + tmp->new_dayindex * day_width,
 					   wv->y + HEADER_HEIGHT,
 					   day_width,
 					   ALLDAY_HEIGHT);
@@ -295,88 +310,256 @@ static gboolean on_draw_event(GtkWidget* widget, cairo_t* cr, gpointer user_data
 	return FALSE;
 }
 
+static int minutes_from_ypos(WeekView* wv, gdouble y)
+{
+	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+	return (y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
+}
+
+static gboolean ypos_in_allday_region(WeekView* wv, gdouble y)
+{
+	if (!has_all_day(wv))
+		return FALSE;
+	return y < (HEADER_HEIGHT + ALLDAY_HEIGHT);
+}
+
+static dayindex dayindex_from_xpos(WeekView* wv, gdouble x)
+{
+	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
+	return num_days * (x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
+}
+
+static void update_cursor_position(WeekView* wv, gdouble x, gdouble y)
+{
+	EventWidget* ew = NULL;
+	unsigned edge = RESIZE_EDGE_NONE;
+	int cursor_minutes = minutes_from_ypos(wv, y);
+	dayindex di = dayindex_from_xpos(wv, x);
+
+	if (ypos_in_allday_region(wv, y)) {
+		wv->hover_event = wv->events_allday[di];
+	} else {
+		const int resizeThreshold = 5;
+		for (ew = wv->events_week[di]; ew; ew = ew->next) {
+			if (abs(ew->minutes_from - cursor_minutes) < resizeThreshold) {
+				edge = RESIZE_EDGE_TOP;
+				break;
+			} else if (abs(ew->minutes_to - cursor_minutes) < resizeThreshold) {
+				edge = RESIZE_EDGE_BOTTOM;
+				break;
+			} else if (ew->minutes_from < cursor_minutes && cursor_minutes < ew->minutes_to) {
+				break;
+			}
+		}
+
+		wv->hover_event = ew;
+	}
+
+	// Call gdk_window_set_cursor infrequently.
+	if (wv->resize_edge != edge) {
+		wv->resize_edge = edge;
+		gdk_window_set_cursor(gtk_widget_get_window(GTK_WIDGET(wv)), (ew && wv->resize_edge != RESIZE_EDGE_NONE) ? wv->resize_cursor : NULL);
+	}
+}
+
 static gboolean on_press_event(GtkWidget* widget, GdkEventButton* event, gpointer data)
 {
 	WeekView* wv = FOCAL_WEEK_VIEW(widget);
 	if (event->button != GDK_BUTTON_PRIMARY)
 		return TRUE;
 
+	// We can get a press event without a motion event, for example by selecting an
+	// event, moving the cursor while the popup prevents us from receiving motion events,
+	// then dismissing the popup and clicking again without moving. So always update
+	// the new pointer position when a press is received
+	update_cursor_position(wv, event->x, event->y);
+
 	if (event->x < SIDEBAR_WIDTH)
 		return TRUE;
 
-	// look for collisions
-	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
-	const dayindex di = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
-	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
-	const gboolean all_day = event->y < day_begin_yoffset;
-	const int minutesAt = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
+	wv->double_click = (event->type == GDK_2BUTTON_PRESS);
+	wv->button_press_origin.x = event->x;
+	wv->button_press_origin.y = event->y;
 
-	EventWidget* ew = NULL;
+	if (wv->hover_event && wv->resize_edge != RESIZE_EDGE_NONE) {
+		wv->drag_action = DRAG_ACTION_RESIZE;
+		return TRUE;
+	}
+
+	if (wv->hover_event && wv->resize_edge == RESIZE_EDGE_NONE) {
+		wv->drag_action = DRAG_ACTION_MOVE;
+		const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+		wv->button_press_minute_offset = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT - wv->hover_event->minutes_from;
+		return TRUE;
+	}
+
+	return TRUE;
+}
+
+static GdkRectangle rect_from_event_widget(WeekView* wv, EventWidget* ew)
+{
 	GdkRectangle rect;
+	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
 	rect.width = (wv->width - SIDEBAR_WIDTH) / num_days;
-	rect.x = di * rect.width + SIDEBAR_WIDTH;
-
-	if (all_day) {
-		if (wv->events_allday[di])
-			ew = wv->events_allday[di];
-
+	rect.x = ew->new_dayindex * rect.width + SIDEBAR_WIDTH;
+	if (event_get_dtstart(ew->ev).is_date) { // all-day event
 		rect.y = HEADER_HEIGHT;
 		rect.height = ALLDAY_HEIGHT;
 	} else {
-		// regular events
-		for (ew = wv->events_week[di]; ew; ew = ew->next) {
-			if (ew->minutes_from < minutesAt && minutesAt < ew->minutes_to) {
-				break;
+		const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+		rect.y = day_begin_yoffset + (ew->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+		rect.height = (ew->minutes_to - ew->minutes_from) * HALFHOUR_HEIGHT / 30;
+	}
+	return rect;
+}
+
+static void create_new_event_at_position(WeekView* wv, gdouble x, gdouble y)
+{
+	GdkRectangle rect;
+	icaltimetype dtstart, dtend;
+
+	dayindex di = dayindex_from_xpos(wv, x);
+	time_t at = wv->current_view.start + di * 24 * 3600;
+
+	if (ypos_in_allday_region(wv, y)) {
+		dtstart = dtend = icaltime_from_timet_with_zone(at, TRUE, wv->current_tz);
+	} else {
+		double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+		int minutes = minutes_from_ypos(wv, y);
+		// dtstart: round down to closest quarter-hour
+		at += 15 * (minutes / 15) * 60;
+		dtstart = dtend = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
+		// duration: default event is 30min long
+		icaltime_adjust(&dtend, 0, 0, 30, 0);
+		rect.y = day_begin_yoffset + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
+		rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
+	}
+	// https://github.com/libical/libical/blob/master/src/test/timezones.c#L96
+	dtstart.zone = dtend.zone = wv->current_tz;
+
+	Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
+
+	event_set_calendar(ev, wv->unsaved_events);
+	event_save(ev);
+
+	wv->current_selection = ev;
+	g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
+}
+
+static gboolean on_release_event(GtkWidget* widget, GdkEventButton* event, gpointer data)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(widget);
+	if (event->button != GDK_BUTTON_PRIMARY)
+		return TRUE;
+
+	// Handle completion of resize and move operations
+	if (wv->drag_action != DRAG_ACTION_NONE) {
+		wv->drag_action = DRAG_ACTION_NONE;
+		g_assert_nonnull(wv->hover_event);
+		EventWidget* ew = wv->hover_event;
+
+		struct icaldurationtype duration = event_get_duration(ew->ev);
+		icaltimetype start = event_get_dtstart(ew->ev);
+		if (!start.is_date) {
+			start.hour = ew->minutes_from / 60;
+			start.minute = ew->minutes_from % 60;
+			duration.hours = (ew->minutes_to - ew->minutes_from) / 60;
+			duration.minutes = (ew->minutes_to - ew->minutes_from) % 60;
+		}
+
+		// If the dayindex has changed, find the event in the EventWidget cache and reposition it
+		EventWidget** cache = start.is_date ? wv->events_allday : wv->events_week;
+		for (int i = 0, n = wv->weekday_end - wv->weekday_start + 1; i < n; ++i) {
+			for (EventWidget** p = &cache[i]; *p; p = &(*p)->next) {
+				if (*p == ew) {
+					if (ew->new_dayindex != i) {
+						start.day += (ew->new_dayindex - i);
+						*p = (*p)->next;
+						ew->next = cache[ew->new_dayindex];
+						cache[ew->new_dayindex] = ew;
+					}
+					break;
+				}
 			}
+		}
+
+		if (icaldurationtype_as_int(duration) != icaldurationtype_as_int(event_get_duration(ew->ev)) || icaltime_compare(start, event_get_dtstart(ew->ev)) != 0) {
+			event_set_dtstart(ew->ev, start);
+			event_set_dtend(ew->ev, icaltime_add(start, duration));
+			gtk_widget_queue_draw((GtkWidget*) wv);
+			return TRUE;
 		}
 	}
 
+	// otherwise, it was a regular click, so check if we should select an event
+	EventWidget* ew = wv->hover_event;
 	if (ew) {
-		if (!all_day) {
-			rect.y = day_begin_yoffset + (ew->minutes_from - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
-			rect.height = (ew->minutes_to - ew->minutes_from) * HALFHOUR_HEIGHT / 30;
-		}
+		GdkRectangle rect = rect_from_event_widget(wv, ew);
 		wv->current_selection = ew->ev;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ew->ev, &rect);
-
-	} else if (event->type == GDK_2BUTTON_PRESS) {
+	} else if (wv->double_click) {
+		wv->double_click = FALSE;
 		// double-click: request to create an event
 		if (wv->calendars == NULL) {
 			// TODO report error (no calendar configured) via UI. TBD: ask whether to open accounts configuration
 			return TRUE;
 		}
-
-		time_t at = wv->current_view.start + di * 24 * 3600;
-		icaltimetype dtstart, dtend;
-
-		if (all_day) {
-			dtstart = dtend = icaltime_from_timet_with_zone(at, TRUE, wv->current_tz);
-		} else {
-			// dtstart: round down to closest quarter-hour
-			at += 15 * (minutesAt / 15) * 60;
-			dtstart = dtend = icaltime_from_timet_with_zone(at, FALSE, wv->current_tz);
-			// duration: default event is 30min long
-			icaltime_adjust(&dtend, 0, 0, 30, 0);
-			rect.y = day_begin_yoffset + (dtstart.hour * 60 + dtstart.minute - wv->scroll_pos) * HALFHOUR_HEIGHT / 30;
-			rect.height = (dtend.hour * 60 + dtend.minute - dtstart.hour * 60 - dtstart.minute) * HALFHOUR_HEIGHT / 30;
-		}
-		// https://github.com/libical/libical/blob/master/src/test/timezones.c#L96
-		dtstart.zone = dtend.zone = wv->current_tz;
-
-		Event* ev = event_new("New Event", dtstart, dtend, wv->current_tz);
-
-		/* Assumes a calendar is loaded, chooses the first in the list. TODO something smarter? */
-		event_set_calendar(ev, wv->unsaved_events);
-		event_save(ev);
-
-		gtk_widget_queue_draw((GtkWidget*) wv);
-		wv->current_selection = ev;
-		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, ev, &rect);
+		create_new_event_at_position(wv, wv->button_press_origin.x, wv->button_press_origin.y);
 	} else {
 		// deselect
 		wv->current_selection = NULL;
 		g_signal_emit(wv, week_view_signals[SIGNAL_EVENT_SELECTED], 0, NULL);
 	}
+
+	return TRUE;
+}
+
+static gboolean on_motion_event(GtkWidget* widget, GdkEventMotion* event, gpointer user)
+{
+	WeekView* wv = FOCAL_WEEK_VIEW(widget);
+
+	const int num_days = (wv->weekday_end - wv->weekday_start + 1);
+	const double day_begin_yoffset = HEADER_HEIGHT + (has_all_day(wv) ? ALLDAY_HEIGHT : 0);
+
+	int minutes = (event->y - day_begin_yoffset + wv->scroll_pos) * 30 / HALFHOUR_HEIGHT;
+
+	if (wv->drag_action == DRAG_ACTION_RESIZE) {
+		g_assert_nonnull(wv->hover_event);
+		// snap the event to every 15 minutes
+		minutes += 8;
+		minutes -= minutes % 15;
+		// don't let the end time preceed the start time etc. Minimum duration 15min.
+		if (wv->resize_edge == RESIZE_EDGE_TOP) {
+			if (minutes > wv->hover_event->minutes_to - 15)
+				minutes = wv->hover_event->minutes_to - 15;
+			wv->hover_event->minutes_from = minutes;
+		} else {
+			if (minutes < wv->hover_event->minutes_from + 15)
+				minutes = wv->hover_event->minutes_from + 15;
+			wv->hover_event->minutes_to = minutes;
+		}
+		gtk_widget_queue_draw(GTK_WIDGET(wv));
+		return TRUE;
+	} else if (wv->drag_action == DRAG_ACTION_MOVE) {
+		g_assert_nonnull(wv->hover_event);
+		minutes -= wv->button_press_minute_offset;
+		// snap the event to every 15 minutes
+		minutes += 8;
+		minutes -= minutes % 15;
+		// maintain the same distance from the drag point to the end time
+		int dur = wv->hover_event->minutes_to - wv->hover_event->minutes_from;
+		wv->hover_event->minutes_from = minutes;
+		wv->hover_event->minutes_to = minutes + dur;
+		wv->hover_event->new_dayindex = num_days * (event->x - SIDEBAR_WIDTH) / (wv->width - SIDEBAR_WIDTH);
+		gtk_widget_queue_draw(GTK_WIDGET(wv));
+		return TRUE;
+	} else {
+		update_cursor_position(wv, event->x, event->y);
+	}
+
+	// otherwise, check for mouseover collisions
+	if (event->x < SIDEBAR_WIDTH)
+		return TRUE;
 
 	return TRUE;
 }
@@ -435,6 +618,8 @@ static void clear_all_events(WeekView* wv)
 	for (int i = 0; i < 7; ++i) {
 		for (EventWidget* p = wv->events_week[i]; p;) {
 			EventWidget* next = p->next;
+			if (p == wv->hover_event)
+				wv->hover_event = NULL;
 			free(p);
 			p = next;
 		}
@@ -519,18 +704,22 @@ static void on_realize(GtkWidget* widget)
 		// TODO TBD: add bg_current_day(?) to allow e.g. invert or vary fg/bg in current day label cell (not needed in dark display)
 		gdk_rgba_parse(&wv->colors.fg_current_day, "#356797");
 	}
+
+	wv->resize_cursor = gdk_cursor_new_from_name(gdk_window_get_display(gtk_widget_get_window(widget)), "ns-resize");
 }
 
 static void week_view_init(WeekView* wv)
 {
 	wv->scroll_pos = 410;
 
-	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
+	gtk_widget_add_events((GtkWidget*) wv, GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK);
 
 	g_signal_connect(G_OBJECT(wv), "size-allocate", G_CALLBACK(on_size_allocate), NULL);
 	g_signal_connect(G_OBJECT(wv), "realize", G_CALLBACK(on_realize), NULL);
 	g_signal_connect(G_OBJECT(wv), "draw", G_CALLBACK(on_draw_event), NULL);
 	g_signal_connect(G_OBJECT(wv), "button-press-event", G_CALLBACK(on_press_event), NULL);
+	g_signal_connect(G_OBJECT(wv), "button-release-event", G_CALLBACK(on_release_event), NULL);
+	g_signal_connect(G_OBJECT(wv), "motion-notify-event", G_CALLBACK(on_motion_event), NULL);
 }
 
 // Returns the number of weeks per year according to ISO8601
@@ -673,10 +862,12 @@ static void add_event_occurrence(Event* ev, icaltimetype next, struct icaldurati
 	w->ev = ev;
 	if (next.is_date) {
 		w->next = wv->events_allday[di];
+		w->new_dayindex = di;
 		wv->events_allday[di] = w;
 	} else {
 		event_widget_set_extents(w, next, duration);
 		w->next = wv->events_week[di];
+		w->new_dayindex = di;
 		wv->events_week[di] = w;
 	}
 }
@@ -711,6 +902,8 @@ void week_view_remove_event(WeekView* wv, Event* ev)
 	for (EventWidget** ew = ll; *ew; ew = &(*ew)->next) {
 		if ((*ew)->ev == ev) {
 			EventWidget* next = (*ew)->next;
+			if (wv->hover_event == *ew)
+				wv->hover_event = NULL;
 			free(*ew);
 			*ew = next;
 			break;
