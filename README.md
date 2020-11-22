@@ -14,7 +14,7 @@ Focal is in very early stages of development and needs a lot more work before it
 
 ```
 # Install dependencies
-sudo apt-get install build-essential git cmake libgtk-3-dev libxml2-dev libical-dev libcurl4-gnutls-dev libjson-glib-dev libsecret-1-dev
+sudo apt-get install build-essential git cmake gperf libgtk-3-dev libxml2-dev libical-dev libcurl4-gnutls-dev libjson-glib-dev libsecret-1-dev
 # Clone the sources
 git clone git@github.com:ohwgiles/focal.git
 # Create a build directory and generate Makefiles
@@ -25,6 +25,14 @@ make && ./focal
 sudo make install && sudo update-desktop-database
 # Alternatively, you can copy res/focal.desktop to ~/.local/share/applications, modify
 # it to set the correct path to the focal executable, and run update-desktop-database
+```
+
+### Debugging with Valgrind
+
+[Valgrind](http://www.valgrind.org/) is a useful tool for finding memory management bugs. Unfortunately, many libraries used by focal perform one-time static allocations, which makes it difficult to separate them from real memory leaks. To that end, the `focal.suppression` file may be used to suppress these errors when hunting down memory leaks:
+
+```
+valgrind --suppressions=focal.suppression --leak-check=full ./build/focal
 ```
 
 ### CalDAV servers

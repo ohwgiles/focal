@@ -16,10 +16,12 @@
 
 #include <gtk/gtk.h>
 
-#include "calendar.h"
-
 #define FOCAL_TYPE_WEEK_VIEW (week_view_get_type())
 G_DECLARE_FINAL_TYPE(WeekView, week_view, FOCAL, WEEK_VIEW, GtkDrawingArea)
+
+typedef struct _Event Event;
+typedef struct _Calendar Calendar;
+typedef struct _CalendarCollection CalendarCollection;
 
 GtkWidget* week_view_new(void);
 
@@ -29,7 +31,6 @@ void week_view_focus_event(WeekView* wv, Event* event);
 void week_view_add_calendar(WeekView* widget, Calendar* cal);
 void week_view_remove_calendar(WeekView* wv, Calendar* cal);
 int week_view_get_week(WeekView* wv);
-icaltime_span week_view_get_current_view(WeekView* wv);
 void week_view_goto_previous(WeekView* wv);
 void week_view_goto_current(WeekView* wv);
 void week_view_goto_next(WeekView* wv);

@@ -48,7 +48,7 @@ static char* outlook_ext_auth_url(const char* code)
 						   "?client_id=" FOCAL_OUTLOOK_CLIENT_ID
 						   "&redirect_uri=net.ohwg.focal%%3A%%2F%%2Fauth"
 						   "&response_type=code"
-						   "&scope=openid+email+offline_access+https%%3A%%2F%%2Foutlook.office.com%%2Fcalendars.readwrite"
+						   "&scope=openid+email+offline_access+https%%3A%%2F%%2Fgraph.microsoft.com%%2Fcalendars.readwrite"
 						   "&state=%s",
 						   code);
 }

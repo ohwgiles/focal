@@ -34,7 +34,7 @@ G_DEFINE_TYPE(DateSelectorButton, date_selector_button, GTK_TYPE_BUTTON)
 
 static void on_day_selected(DateSelectorButton* dsb)
 {
-	struct tm t;
+	struct tm t = {0};
 	char buffer[48];
 	gtk_calendar_get_date(GTK_CALENDAR(dsb->calendar), &t.tm_year, &t.tm_mon, &t.tm_mday);
 	g_signal_emit(dsb, signal_date_changed, 0, t.tm_mday, t.tm_mon, t.tm_year);

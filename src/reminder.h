@@ -1,5 +1,5 @@
 /*
- * event-popup.h
+ * reminder.h
  * This file is part of focal, a calendar application for Linux
  * Copyright 2018 Oliver Giles and focal contributors.
  *
@@ -11,19 +11,23 @@
  * You should have received a copy of the GNU General Public License
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
-#ifndef EVENT_POPUP_H
-#define EVENT_POPUP_H
+#ifndef REMINDER_H
+#define REMINDER_H
 
 #include <gtk/gtk.h>
 
-#define FOCAL_TYPE_EVENT_POPUP (event_popup_get_type())
-G_DECLARE_FINAL_TYPE(EventPopup, event_popup, FOCAL, EVENT_POPUP, GtkPopover)
-
-typedef struct _Event Event;
 typedef struct _CalendarCollection CalendarCollection;
 
-void event_popup_set_calendar_collection(EventPopup* ep, CalendarCollection* cc);
+void reminder_init(CalendarCollection* cc);
 
-void event_popup_set_event(EventPopup* ep, Event* ev);
+// Set up timers for all events in the passed list of calendars
+// which will occur soon. This method should be called every time
+// the calendars change. Existing timers which are still valid
+// will remain unchanged.
+// TODO: support updating events from just a single calendar
+// TODO: periodic sync of notifications even when calendars don't sync
+void reminder_sync_notifications(GSList* calendars);
 
-#endif //EVENT_POPUP_H
+void reminder_cleanup(void);
+
+#endif //REMINDER_H

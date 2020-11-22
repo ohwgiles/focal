@@ -25,4 +25,6 @@ void app_header_set_event(AppHeader* ah, Event* ev);
 
 void app_header_calendar_view_changed(AppHeader*, int week_number, time_t from, time_t until);
 
+void app_header_set_sync_in_progress(AppHeader* ah, gboolean in_progress);
+
 #endif // APPHEADER_H

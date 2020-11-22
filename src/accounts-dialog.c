@@ -18,7 +18,7 @@
 struct _AccountsDialog {
 	GtkDialog parent;
 	GtkWidget* list;
-	GSList* accounts;
+	GSList** accounts;
 };
 G_DEFINE_TYPE(AccountsDialog, accounts_dialog, GTK_TYPE_DIALOG)
 
@@ -32,7 +32,7 @@ static guint accounts_dialog_signals[LAST_SIGNAL] = {0};
 static void populate_account_list(AccountsDialog* dialog)
 {
 	gtk_container_forall(GTK_CONTAINER(dialog->list), (GtkCallback) gtk_widget_destroy, NULL);
-	for (GSList* p = dialog->accounts; p; p = p->next) {
+	for (GSList* p = *dialog->accounts; p; p = p->next) {
 		CalendarConfig* cfg = (CalendarConfig*) p->data;
 		gtk_container_add(GTK_CONTAINER(dialog->list), gtk_label_new(cfg->label));
 	}
@@ -43,11 +43,11 @@ static void edit_accounts_response(AccountsDialog* dialog, gint response_id, Acc
 {
 	if (response_id == GTK_RESPONSE_OK) {
 		CalendarConfig* cfg = account_edit_dialog_get_account(edit_dialog);
-		if (g_slist_find(dialog->accounts, cfg) == NULL) {
+		if (g_slist_find(*dialog->accounts, cfg) == NULL) {
 			// new configuration
-			dialog->accounts = g_slist_append(dialog->accounts, cfg);
+			*dialog->accounts = g_slist_append(*dialog->accounts, cfg);
 		}
-		g_signal_emit(dialog, accounts_dialog_signals[SIGNAL_CONFIG_CHANGED], 0, dialog->accounts);
+		g_signal_emit(dialog, accounts_dialog_signals[SIGNAL_CONFIG_CHANGED], 0);
 		populate_account_list(dialog);
 	}
 	gtk_widget_destroy(GTK_WIDGET(edit_dialog));
@@ -64,7 +64,7 @@ static void on_clicked_edit(AccountsDialog* dialog, GtkToolButton* button)
 {
 	gint selected_index = gtk_list_box_row_get_index(gtk_list_box_get_selected_row(GTK_LIST_BOX(dialog->list)));
 	g_assert(selected_index >= 0);
-	CalendarConfig* cfg = g_slist_nth_data(dialog->accounts, (guint) selected_index);
+	CalendarConfig* cfg = g_slist_nth_data(*dialog->accounts, (guint) selected_index);
 	GtkWidget* edit_dialog = account_edit_dialog_new(gtk_window_get_transient_for(GTK_WINDOW(dialog)), cfg);
 	g_signal_connect_swapped(edit_dialog, "response", (GCallback) edit_accounts_response, dialog);
 	gtk_widget_show_all(edit_dialog);
@@ -77,10 +77,10 @@ static void on_clicked_delete(AccountsDialog* dialog, GtkToolButton* button)
 	if (ret == GTK_RESPONSE_YES) {
 		gint selected_index = gtk_list_box_row_get_index(gtk_list_box_get_selected_row(GTK_LIST_BOX(dialog->list)));
 		g_assert(selected_index >= 0);
-		GSList* to_remove = g_slist_nth(dialog->accounts, (guint) selected_index);
-		dialog->accounts = g_slist_remove_link(dialog->accounts, to_remove);
+		GSList* to_remove = g_slist_nth(*dialog->accounts, (guint) selected_index);
+		*dialog->accounts = g_slist_remove_link(*dialog->accounts, to_remove);
 		calendar_config_free(to_remove->data);
-		g_signal_emit(dialog, accounts_dialog_signals[SIGNAL_CONFIG_CHANGED], 0, dialog->accounts);
+		g_signal_emit(dialog, accounts_dialog_signals[SIGNAL_CONFIG_CHANGED], 0);
 		populate_account_list(dialog);
 	}
 	gtk_widget_destroy(confirm);
@@ -88,14 +88,14 @@ static void on_clicked_delete(AccountsDialog* dialog, GtkToolButton* button)
 
 static void accounts_dialog_class_init(AccountsDialogClass* klass)
 {
-	accounts_dialog_signals[SIGNAL_CONFIG_CHANGED] = g_signal_new("accounts-changed", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_POINTER);
+	accounts_dialog_signals[SIGNAL_CONFIG_CHANGED] = g_signal_new("accounts-changed", G_TYPE_FROM_CLASS((GObjectClass*) klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void accounts_dialog_init(AccountsDialog* self)
 {
 }
 
-GtkWidget* accounts_dialog_new(GtkWindow* parent_window, GSList* accounts)
+GtkWidget* accounts_dialog_new(GtkWindow* parent_window, GSList** accounts)
 {
 	AccountsDialog* dialog = g_object_new(FOCAL_TYPE_ACCOUNTS_DIALOG, NULL);
 	dialog->accounts = accounts;

@@ -9,4 +9,5 @@ SpaceAfterCStyleCast: true
 BreakBeforeBraces: Linux
 AllowShortIfStatementsOnASingleLine: false
 IndentCaseLabels: false
+ForEachMacros: ['calendar_collection_foreach']
 ...

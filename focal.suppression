@@ -1,0 +1,80 @@
+{
+	g_type_register_fundamental
+	Memcheck:Leak
+	...
+	fun:g_type_register_fundamental
+}
+
+{
+	g_type_add_interface_static
+	Memcheck:Leak
+	...
+	fun:g_type_add_interface_static
+}
+
+{
+	g_type_class_ref
+	Memcheck:Leak
+	...
+	fun:g_type_class_ref
+}
+
+{
+	pango_language_get_default
+	Memcheck:Leak
+	...
+	fun:pango_language_get_default
+}
+
+{
+	g_type_register_static
+	Memcheck:Leak
+	...
+	fun:g_type_register_static
+}
+
+{
+	cairo_toy_font_face_create
+	Memcheck:Leak
+	...
+	fun:cairo_toy_font_face_create
+}
+
+{
+	libgio pthread_create
+	Memcheck:Leak
+	...
+	fun:pthread_create*
+	...
+	obj:/usr/*lib*/libgio-2.*
+}
+
+{
+	pa_threaded_mainloop_start
+	Memcheck:Leak
+	...
+	fun:pa_threaded_mainloop_start
+}
+
+{
+	fontconfig
+	Memcheck:Leak
+	...
+	obj:/usr/lib/libfontconfig.so.1.12.0
+}
+
+{
+	gtk_widget_get_default_style
+	Memcheck:Leak
+	...
+	fun:gtk_widget_get_default_style
+}
+
+{
+	_dl_init
+	Memcheck:Leak
+	...
+	fun:_dl_init
+	obj:/usr/lib/ld-2.28.so
+}
+

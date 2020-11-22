@@ -1,7 +1,7 @@
 /*
  * caldav-calendar.c
  * This file is part of focal, a calendar application for Linux
- * Copyright 2018 Oliver Giles and focal contributors.
+ * Copyright 2018-2020 Oliver Giles and focal contributors.
  *
  * Focal is free software: you can redistribute it and/or modify it
  * under the terms of the GNU General Public License version 3 as
@@ -243,16 +243,18 @@ static void caldav_modify_done(CURL* curl, CURLcode ret, void* user)
 		}
 
 		// "officially" append the event to the collection
+		// TODO: event_replace_component?
 		if (ac->old_event)
 			ac->cal->events = g_slist_remove(ac->cal->events, ac->old_event);
 		if (ac->new_event)
 			ac->cal->events = g_slist_append(ac->cal->events, ac->new_event);
 
-		// reuse the sync-done event since for now the action is the same -> refresh the UI
-		g_signal_emit_by_name(ac->cal, "sync-done", 0);
+		g_signal_emit_by_name(ac->cal, "event-updated", ac->old_event, ac->new_event);
+
+		if (ac->old_event && ac->old_event != ac->new_event)
+			g_object_unref(ac->old_event);
 	} else {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(ac), "Error modifying calendar: %s", curl_easy_strerror(ret));
 	}
 
 	ac->cal->op_pending = FALSE;
@@ -387,7 +389,7 @@ static void each_event(Calendar* c, CalendarEachEventCallback callback, void* us
 
 static void free_events(CaldavCalendar* rc)
 {
-	g_slist_free_full(rc->events, (GDestroyNotify) event_free);
+	g_slist_free_full(rc->events, (GDestroyNotify) g_object_unref);
 }
 
 static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde)
@@ -395,7 +397,10 @@ static Event* create_event_from_parsed_xml(CaldavCalendar* cal, CaldavEntry* cde
 	// event updated
 	icalcomponent* comp = icalparser_parse_string(cde->caldata);
 	icalcomponent* vev = icalcomponent_get_first_component(comp, ICAL_VEVENT_COMPONENT);
-	g_assert_nonnull(vev);
+	if (!vev) {
+		icalcomponent_free(comp);
+		return NULL;
+	}
 	Event* ev = event_new_from_icalcomponent(vev);
 	event_set_calendar(ev, FOCAL_CALENDAR(cal));
 	event_set_url(ev, cde->href);
@@ -432,11 +437,11 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// Handle the case where the http request failed
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(rc), "Error syncing calendar: %s", curl_easy_strerror(ret));
 		sc->cal->op_pending = FALSE;
 		g_string_free(sc->report_resp, TRUE);
 		free(sc);
+		g_signal_emit_by_name(rc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -468,16 +473,21 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 						// we already knew about this update (we probably did it ourselves). Just ignore it.
 						caldav_entry_free(cde);
 					} else {
+						Event* updated_event = create_event_from_parsed_xml(rc, cde);
+						// notify anyone using the old event that it's about to disappear
+						g_signal_emit_by_name(rc, "event-updated", (*p)->data, updated_event);
 						// replace the old event with the new one
-						event_free((*p)->data);
-						(*p)->data = create_event_from_parsed_xml(rc, cde);
+						g_object_unref((*p)->data);
+						(*p)->data = updated_event;
 						nUpdated++;
 					}
 				} else {
 					// If the calendar-data is NULL, assume the event is deleted. This can
 					// happen if an event is removed after the sync-collection request but
-					// before the response to this multiget.
-					event_free((*p)->data);
+					// before the response to this multiget. Notify anyone using the event
+					// that it's about to disappear.
+					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
+					g_object_unref((*p)->data);
 					*p = (*p)->next;
 					caldav_entry_free(cde);
 				}
@@ -500,12 +510,13 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 	// Everything remaining in ctx.event_list should be new events
 	for (GSList* e = ctx.result_list; e; e = e->next) {
 		CaldavEntry* cde = e->data;
+		Event* event;
 		// A removal or permission denied that was not matched in the local list above will still be here,
 		// but its caldata member will be empty. So it can be ignored.
-		if (cde->caldata) {
-			Event* event = create_event_from_parsed_xml(rc, cde);
+		if (cde->caldata && (event = create_event_from_parsed_xml(rc, cde))) {
 			sc->cal->events = g_slist_append(sc->cal->events, event);
 			nNew++;
+			g_signal_emit_by_name(rc, "event-updated", NULL, event);
 		} else {
 			caldav_entry_free(cde);
 		}
@@ -519,7 +530,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// All done, notify
 	rc->op_pending = FALSE;
-	g_signal_emit_by_name(rc, "sync-done", 0);
+	g_signal_emit_by_name(rc, "sync-done", TRUE, 0);
 }
 
 static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, GSList* hrefs)
@@ -578,11 +589,11 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 
 	// Handle the case where the http request failed
 	if (ret != CURLE_OK) {
-		// TODO report error via UI
-		fprintf(stderr, "curl error: %s\n", curl_easy_strerror(ret));
+		_calendar_error(FOCAL_CALENDAR(rc), "Error syncing calendar: %s", curl_easy_strerror(ret));
 		sc->cal->op_pending = FALSE;
 		g_string_free(sc->report_resp, TRUE);
 		free(sc);
+		g_signal_emit_by_name(rc, "sync-done", FALSE, 0);
 		return;
 	}
 
@@ -620,7 +631,8 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 			for (GSList** p = &sc->cal->events; *p; p = &(*p)->next) {
 				Event* ee = (Event*) (*p)->data;
 				if (strcmp(se->href, event_get_url(ee)) == 0) {
-					event_free((*p)->data);
+					g_signal_emit_by_name(rc, "event-updated", (*p)->data, NULL);
+					g_object_unref((*p)->data);
 					*p = (*p)->next;
 					nDeleted++;
 					break;
@@ -644,7 +656,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 		}
 		// sync-done here is necessary if items were deleted OR it's the initial sync.
 		// We know whether we deleted something but don't know if this is an initial sync.
-		g_signal_emit_by_name(rc, "sync-done", 0);
+		g_signal_emit_by_name(rc, "sync-done", TRUE, 0);
 		rc->op_pending = FALSE;
 		return;
 	}
@@ -743,6 +755,7 @@ void caldav_calendar_class_init(CaldavCalendarClass* klass)
 	FOCAL_CALENDAR_CLASS(klass)->each_event = each_event;
 	FOCAL_CALENDAR_CLASS(klass)->sync = caldav_sync;
 	FOCAL_CALENDAR_CLASS(klass)->read_only = caldav_is_read_only;
+	FOCAL_CALENDAR_CLASS(klass)->sync_date_range = NULL;
 
 	FOCAL_CALENDAR_CLASS(klass)->attach_authenticator = attach_authenticator;
 	G_OBJECT_CLASS(klass)->constructed = constructed;

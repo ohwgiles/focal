@@ -18,6 +18,8 @@
 
 struct _AppHeader {
 	GtkHeaderBar parent;
+	GtkWidget* icon_sync;
+	GtkWidget* icon_progress;
 	GtkWidget* btn_current;
 	GtkWidget* btn_next;
 	GtkWidget* btn_sync;
@@ -61,12 +63,12 @@ static void update_title(AppHeader* ah)
 
 		// update header subtitle
 		char start[28];
-		strftime(start, sizeof(start), "%e. %B %G", localtime(&ah->display_range.from));
+		strftime(start, sizeof(start), "%e. %B %Y", localtime(&ah->display_range.from));
 
 		// time of current_view.end is midnight, ensure not to display the following day's date: subtract 1h
 		time_t day_end = ah->display_range.until - 3600;
 		char end[28];
-		strftime(end, sizeof(end), "%e. %B %G", localtime(&day_end));
+		strftime(end, sizeof(end), "%e. %B %Y", localtime(&day_end));
 
 		char subtitle[64];
 		snprintf(subtitle, sizeof(subtitle), "%s – %s", start, end);
@@ -132,28 +134,47 @@ void app_header_init(AppHeader* ah)
 	g_signal_connect_swapped(prev, "clicked", (GCallback) &app_header_nav_prev, ah);
 	g_signal_connect_swapped(ah->btn_current, "clicked", (GCallback) &app_header_nav_current, ah);
 	g_signal_connect_swapped(ah->btn_next, "clicked", (GCallback) &app_header_nav_next, ah);
+	gtk_widget_set_tooltip_text(prev, "Previous week");
+	gtk_widget_set_tooltip_text(ah->btn_current, "Show today");
+	gtk_widget_set_tooltip_text(ah->btn_next, "Next week");
 
 	ah->btn_menu = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(ah->btn_menu), gtk_image_new_from_icon_name("open-menu-symbolic", GTK_ICON_SIZE_MENU));
 	g_signal_connect_swapped(ah->btn_menu, "clicked", (GCallback) &app_header_menu, ah);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(ah), ah->btn_menu);
 
+	ah->icon_progress = gtk_spinner_new();
+	ah->icon_sync = gtk_image_new_from_icon_name("emblem-synchronizing-symbolic", GTK_ICON_SIZE_MENU);
+	g_object_ref_sink(ah->icon_sync);
+	g_object_ref_sink(ah->icon_progress);
+
 	ah->btn_sync = gtk_button_new();
-	gtk_button_set_image(GTK_BUTTON(ah->btn_sync), gtk_image_new_from_icon_name("emblem-synchronizing-symbolic", GTK_ICON_SIZE_MENU));
+	gtk_button_set_image(GTK_BUTTON(ah->btn_sync), ah->icon_sync);
 	g_signal_connect_swapped(ah->btn_sync, "clicked", (GCallback) &app_header_sync, ah);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(ah), ah->btn_sync);
+	gtk_widget_set_tooltip_text(ah->btn_sync, "Synchronize");
 
 	ah->btn_delete = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(ah->btn_delete), gtk_image_new_from_icon_name("edit-delete-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect_swapped(ah->btn_delete, "clicked", (GCallback) &app_header_delete, ah);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(ah), ah->btn_delete);
+	gtk_widget_set_tooltip_text(ah->btn_delete, "Delete");
 
 	ah->btn_save = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(ah->btn_save), gtk_image_new_from_icon_name("document-save-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect_swapped(ah->btn_save, "clicked", (GCallback) &app_header_save, ah);
 	gtk_header_bar_pack_end(GTK_HEADER_BAR(ah), ah->btn_save);
+	gtk_widget_set_tooltip_text(ah->btn_save, "Save");
 
 	gtk_header_bar_pack_start(GTK_HEADER_BAR(ah), nav);
+}
+
+static void finalize(GObject* gobject)
+{
+	AppHeader* ah = FOCAL_APP_HEADER(gobject);
+	g_object_unref(ah->icon_sync);
+	g_object_unref(ah->icon_progress);
+	G_OBJECT_CLASS(app_header_parent_class)->finalize(gobject);
 }
 
 void app_header_class_init(AppHeaderClass* klass)
@@ -164,6 +185,8 @@ void app_header_class_init(AppHeaderClass* klass)
 	app_header_signals[SIGNAL_NAV_NEXT] = g_signal_new("nav-next", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 	app_header_signals[SIGNAL_REQUEST_MENU] = g_signal_new("request-menu", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_POINTER, 0);
 	app_header_signals[SIGNAL_CALS_SYNC] = g_signal_new("sync", FOCAL_TYPE_APP_HEADER, G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+
+	G_OBJECT_CLASS(klass)->finalize = finalize;
 }
 
 void app_header_set_event(AppHeader* ah, Event* ev)
@@ -197,4 +220,13 @@ void app_header_calendar_view_changed(AppHeader* ah, int week_number, time_t fro
 	ah->display_range.until = until;
 	if (!ah->event)
 		update_title(ah);
+}
+
+void app_header_set_sync_in_progress(AppHeader* ah, gboolean in_progress)
+{
+	gtk_button_set_image(GTK_BUTTON(ah->btn_sync), in_progress ? ah->icon_progress : ah->icon_sync);
+	if (in_progress)
+		gtk_spinner_start(GTK_SPINNER(ah->icon_progress));
+	else
+		gtk_spinner_stop(GTK_SPINNER(ah->icon_progress));
 }

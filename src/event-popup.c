@@ -12,17 +12,20 @@
  * version 3 with focal. If not, see <http://www.gnu.org/licenses/>.
  */
 #include "event-popup.h"
+#include "calendar-collection.h"
 #include "calendar.h"
 #include "time-spin-button.h"
 
 struct _EventPopup {
 	GtkPopover parent;
 	GtkWidget* title;
+	GtkWidget* combo_calendar;
 	GtkWidget* starts_at;
 	GtkWidget* duration;
 	GtkWidget* btn_save;
 	GtkWidget* btn_delete;
 	Event* selected_event;
+	CalendarCollection* calendars;
 };
 G_DEFINE_TYPE(EventPopup, event_popup, GTK_TYPE_POPOVER)
 
@@ -64,8 +67,20 @@ static void delete_clicked(GtkButton* button, gpointer user_data)
 
 static void save_clicked(GtkButton* button, gpointer user_data)
 {
-	EventPopup* ew = FOCAL_EVENT_POPUP(user_data);
-	event_save(ew->selected_event);
+	EventPopup* ep = FOCAL_EVENT_POPUP(user_data);
+	Event* ev = ep->selected_event;
+	Calendar* event_calendar = event_get_calendar(ev);
+	Calendar* target_calendar = calendar_collection_get_by_name(ep->calendars, gtk_combo_box_get_active_id(GTK_COMBO_BOX(ep->combo_calendar)));
+
+	if (target_calendar != NULL && target_calendar != event_calendar) {
+		// saving an event to a calendar takes ownership of the event if it was not
+		// already owned. calendar_delete_event will unref the event, so create a
+		// new reference to prevent the event from being freed.
+		g_object_ref_sink(ev);
+		calendar_delete_event(event_calendar, ev);
+		event_set_calendar(ev, target_calendar);
+	}
+	event_save(ev);
 }
 
 static void open_details(GtkButton* button, gpointer user_data)
@@ -98,6 +113,11 @@ static void event_popup_init(EventPopup* e)
 	e->title = g_object_new(GTK_TYPE_ENTRY, NULL);
 	gtk_container_add(GTK_CONTAINER(bar), e->title);
 
+	e->combo_calendar = g_object_new(GTK_TYPE_COMBO_BOX, "id-column", 0, NULL);
+	GtkCellRenderer* column = gtk_cell_renderer_text_new();
+	gtk_cell_layout_pack_start(GTK_CELL_LAYOUT(e->combo_calendar), column, TRUE);
+	gtk_cell_layout_set_attributes(GTK_CELL_LAYOUT(e->combo_calendar), column, "text", 0, NULL);
+
 	GtkWidget* grid = gtk_grid_new();
 	g_object_set(grid, "margin", 5, NULL);
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 5);
@@ -117,34 +137,41 @@ static void event_popup_init(EventPopup* e)
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("emblem-ok-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_yes_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Attending");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-question-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_maybe_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Tentative");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("dialog-error-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &rsvp_no_clicked, e);
+	gtk_widget_set_tooltip_text(btn, "Decline");
 	gtk_action_bar_pack_start(GTK_ACTION_BAR(actions), btn);
 
 	e->btn_delete = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->btn_delete), gtk_image_new_from_icon_name("edit-delete-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(e->btn_delete, "clicked", (GCallback) &delete_clicked, e);
+	gtk_widget_set_tooltip_text(e->btn_delete, "Delete");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), e->btn_delete);
 
 	e->btn_save = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(e->btn_save), gtk_image_new_from_icon_name("document-save-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(e->btn_save, "clicked", (GCallback) &save_clicked, e);
+	gtk_widget_set_tooltip_text(e->btn_save, "Save");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), e->btn_save);
 
 	btn = gtk_button_new();
 	gtk_button_set_image(GTK_BUTTON(btn), gtk_image_new_from_icon_name("view-more-horizontal-symbolic", GTK_ICON_SIZE_SMALL_TOOLBAR));
 	g_signal_connect(btn, "clicked", (GCallback) &open_details, e);
+	gtk_widget_set_tooltip_text(btn, "Details...");
 	gtk_action_bar_pack_end(GTK_ACTION_BAR(actions), btn);
 
 	gtk_box_pack_start(GTK_BOX(box), bar, FALSE, FALSE, 0);
+	gtk_box_pack_start(GTK_BOX(box), e->combo_calendar, FALSE, FALSE, 0);
 	gtk_box_pack_start(GTK_BOX(box), grid, TRUE, TRUE, 0);
 	gtk_box_pack_start(GTK_BOX(box), actions, TRUE, TRUE, 0);
 	gtk_container_add(GTK_CONTAINER(e), box);
@@ -176,14 +203,27 @@ static void on_duration_modified(GtkSpinButton* duration, EventPopup* ep)
 	g_signal_emit(ep, event_panel_signals[SIGNAL_EVENT_MODIFIED], 0, ep->selected_event);
 }
 
+static void event_updated(EventPopup* ep, Event* old_event, Event* new_event, Calendar* cal)
+{
+	// TODO: maybe notify the user that the event has changed out from underneath them?
+	if (old_event == ep->selected_event) {
+		event_popup_set_event(ep, new_event);
+	}
+}
+
 void event_popup_set_event(EventPopup* ew, Event* ev)
 {
 	g_signal_handlers_disconnect_by_func(ew->title, (gpointer) on_event_title_modified, ew);
 	g_signal_handlers_disconnect_by_func(ew->starts_at, (gpointer) on_starts_at_modified, ew);
 	g_signal_handlers_disconnect_by_func(ew->duration, (gpointer) on_duration_modified, ew);
 
+	// necessary to recalculate the visible rows
+	gtk_tree_model_filter_refilter(GTK_TREE_MODEL_FILTER(gtk_combo_box_get_model(GTK_COMBO_BOX(ew->combo_calendar))));
+
 	if ((ew->selected_event = ev)) {
 		gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(ew->title)), event_get_summary(ev), -1);
+
+		gtk_combo_box_set_active_id(GTK_COMBO_BOX(ew->combo_calendar), calendar_get_name(event_get_calendar(ev)));
 
 		// TODO: timezone conversion
 		icaltimetype dt = event_get_dtstart(ev);
@@ -203,5 +243,13 @@ void event_popup_set_event(EventPopup* ew, Event* ev)
 		gtk_widget_set_sensitive(ew->duration, editable);
 		gtk_widget_set_sensitive(ew->btn_save, editable);
 		gtk_widget_set_sensitive(ew->btn_delete, editable);
+
+		g_signal_connect_swapped(event_get_calendar(ev), "event-updated", G_CALLBACK(event_updated), ew);
 	}
+}
+
+void event_popup_set_calendar_collection(EventPopup* ep, CalendarCollection* cc)
+{
+	ep->calendars = cc;
+	gtk_combo_box_set_model(GTK_COMBO_BOX(ep->combo_calendar), calendar_collection_new_filtered_model(cc, TRUE, TRUE));
 }
