@@ -180,7 +180,7 @@ static void populate_event_from_json(Event* e, JsonReader* reader)
 		json_reader_read_member(reader, "pattern");
 		json_reader_read_member(reader, "interval");
 		r.interval = json_reader_get_int_value(reader);
-		json_reader_end_member(reader);
+		json_reader_end_member(reader); //interval
 		json_reader_read_member(reader, "type");
 		const gchar* type = json_reader_get_string_value(reader);
 		if (g_strcmp0(type, "weekly") == 0) {
@@ -189,8 +189,44 @@ static void populate_event_from_json(Event* e, JsonReader* reader)
 			fprintf(stderr, "Unhandled recurrence type %s\n", type);
 			r.freq = ICAL_NO_RECURRENCE;
 		}
-		json_reader_end_member(reader);
-		json_reader_end_member(reader);
+		json_reader_end_member(reader); //type
+		if(json_reader_read_member(reader, "daysOfWeek")) {
+			for (int i = 0, n = json_reader_count_elements(reader); i < n; ++i) {
+				json_reader_read_element(reader, i);
+				const gchar* dow = json_reader_get_string_value(reader);
+				if(g_strcmp0(dow, "sunday") == 0)
+					r.by_day[i] = ICAL_SUNDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "monday") == 0)
+					r.by_day[i] = ICAL_MONDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "tuesday") == 0)
+					r.by_day[i] = ICAL_TUESDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "wednesday") == 0)
+					r.by_day[i] = ICAL_WEDNESDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "thursday") == 0)
+					r.by_day[i] = ICAL_THURSDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "friday") == 0)
+					r.by_day[i] = ICAL_FRIDAY_WEEKDAY;
+				else if(g_strcmp0(dow, "saturday") == 0)
+					r.by_day[i] = ICAL_SATURDAY_WEEKDAY;
+				json_reader_end_element(reader);
+			}
+		}
+		json_reader_end_member(reader); //daysOfWeek
+		json_reader_end_member(reader); //pattern
+		json_reader_read_member(reader, "range");
+		if(json_reader_is_object(reader)) {
+			json_reader_read_member(reader, "type");
+			const gchar *type = json_reader_get_string_value(reader);
+			json_reader_end_member(reader);
+			if(g_strcmp0(type, "endDate") == 0) {
+				json_reader_read_member(reader, "endDate");
+				const char* str = json_reader_get_string_value(reader);
+				// 2018-08-28
+				sscanf(str, "%d-%d-%d", &r.until.year, &r.until.month, &r.until.day);
+				json_reader_end_member(reader); //endDate
+			}
+		}
+		json_reader_end_member(reader); //range
 		// TODO: more complicated recurrence
 		icalcomponent_add_property(event, icalproperty_new_rrule(r));
 	}
@@ -398,29 +434,39 @@ typedef struct {
 typedef struct {
 	gboolean exception;
 	char* seriesMasterId;
-	icaltimetype start, end;
+	icaltimetype originalStart, start, end;
 } RecurrenceInfo;
 
 static void process_event_exceptions(SyncContext* sc)
 {
+	GSList* updated = 0;
+
 	for (GSList* s = sc->recurrences; s; s = s->next) {
 		RecurrenceInfo* ri = (RecurrenceInfo*) s->data;
 		Event* master = g_hash_table_lookup(sc->oc->events, ri->seriesMasterId);
 		if (!master) {
-			g_warning("Series master not found: %s", ri->seriesMasterId);
+			// Probably the event was cancelled, no need to warn
+			//g_warning("Series master not found: %s", ri->seriesMasterId);
 			continue;
 		}
 
 		icalcomponent* cmp = event_get_component(master);
-		if (ri->exception)
-			icalcomponent_add_property(cmp, icalproperty_new_exdate(ri->start));
-		else {
-			event_add_occurrence(master, ri->start, ri->end);
+		if (ri->exception) {
+			icalcomponent_add_property(cmp, icalproperty_new_exdate(ri->originalStart));
 		}
+
+		event_add_occurrence(master, ri->start, ri->end);
+		updated = g_slist_append(updated, master);
 
 		// TODO: would be cleaner to provide a descructor for RecurrenceInfo
 		g_free(ri->seriesMasterId);
 	}
+
+	for (GSList* s = updated; s; s = s->next) {
+		g_signal_emit_by_name(sc->oc, "event-updated", s->data, s->data);
+	}
+
+	g_slist_free(updated);
 }
 
 static RecurrenceInfo* parse_recurrence_info_from_json(JsonReader* reader)
@@ -431,12 +477,22 @@ static RecurrenceInfo* parse_recurrence_info_from_json(JsonReader* reader)
 	ri->seriesMasterId = g_strdup(json_reader_get_string_value(reader));
 	json_reader_end_member(reader);
 	// "type" field may be "exception" or "occurrence". Save this for later so we
-	// know whether to create an RDATE or an EXDATE.
+	// know whether to create an RDATE or an RDATE *and* an EXDATE.
 	// See https://docs.microsoft.com/en-us/graph/api/resources/event?view=graph-rest-1.0
 	json_reader_read_member(reader, "type");
 	ri->exception = g_strcmp0(json_reader_get_string_value(reader), "exception") == 0;
 	json_reader_end_member(reader);
-	// Extract actual time of recurrence/exception
+	// If "type" is "exception", the original occurrence needs to be excluded. Find it with originalStart
+	if(json_reader_read_member(reader, "originalStart")) {
+		const char *os = json_reader_get_string_value(reader);
+		icaltimetype *ost = &ri->originalStart;
+		// 2021-01-05T08:00:00Z
+		sscanf(os, "%d-%d-%dT%d:%d:%d", &ost->year, &ost->month, &ost->day, &ost->hour, &ost->minute, &ost->second);
+		ost->zone = icaltimezone_get_utc_timezone();
+	}
+	json_reader_end_member(reader);
+
+	// Extract actual time of recurrence
 	json_reader_read_member(reader, "start");
 	ri->start = icaltime_from_outlook_json(reader);
 	json_reader_end_member(reader);
@@ -482,6 +538,15 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	for (int i = 0, n = json_reader_count_elements(reader); i < n; ++i) {
 		json_reader_read_element(reader, i);
 
+		// ignore cancelled events
+		json_reader_read_member(reader, "isCancelled");
+		gboolean isCancelled = json_reader_get_boolean_value(reader);
+		json_reader_end_member(reader);
+		if(isCancelled) {
+			json_reader_end_element(reader);
+			continue;
+		}
+
 		json_reader_read_member(reader, "type");
 		// The API helpfully returns the seriesMaster for occurrences within the requested
 		// range even if the seriesMaster itself is outside the range. We need this so we
@@ -512,9 +577,15 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 			} else if (existing) {
 				// Can't just call populate_event_from_json because currently it assumes
 				// an empty event, i.e. it will *add* elements rather than checking and
-				// updating existing ones. TODO improve this! For now we delete first RRULE
+				// updating existing ones. TODO improve this! For now we delete all RRULEs,
+				// RDATEs and EXDATEs
 				icalcomponent* cmp = event_get_component(existing);
-				icalcomponent_remove_property(cmp, icalcomponent_get_first_property(cmp, ICAL_RRULE_PROPERTY));
+				for(icalproperty* p = icalcomponent_get_first_property(cmp, ICAL_RRULE_PROPERTY); p; p = icalcomponent_get_next_property(cmp, ICAL_RRULE_PROPERTY))
+					icalcomponent_remove_property(cmp, p);
+				for(icalproperty* p = icalcomponent_get_first_property(cmp, ICAL_RDATE_PROPERTY); p; p = icalcomponent_get_next_property(cmp, ICAL_RDATE_PROPERTY))
+					icalcomponent_remove_property(cmp, p);
+				for(icalproperty* p = icalcomponent_get_first_property(cmp, ICAL_EXDATE_PROPERTY); p; p = icalcomponent_get_next_property(cmp, ICAL_EXDATE_PROPERTY))
+					icalcomponent_remove_property(cmp, p);
 				// then repopulate...
 				populate_event_from_json(existing, reader);
 				g_signal_emit_by_name(oc, "event-updated", existing, existing);
