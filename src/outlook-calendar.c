@@ -90,7 +90,7 @@ static void on_delete_complete(CURL* curl, CURLcode ret, void* user)
 	g_free(mc);
 }
 
-static void do_delete_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event)
+static void do_delete_event(OutlookCalendar* oc, gchar* err, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	ModifyContext* pc = g_new0(ModifyContext, 1);
 	pc->oc = oc;
@@ -265,7 +265,7 @@ static void populate_event_from_json(Event* e, JsonReader* reader)
 	// TODO: many more fields
 }
 
-static void do_outlook_add_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event);
+static void do_outlook_add_event(OutlookCalendar* oc, gchar* err, CURL* curl, struct curl_slist* headers, Event* event);
 
 static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 {
@@ -314,7 +314,7 @@ static void on_create_event_complete(CURL* curl, CURLcode ret, void* user)
 	g_free(mc);
 }
 
-static void do_outlook_add_event(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers, Event* event)
+static void do_outlook_add_event(OutlookCalendar* oc, gchar* err, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	JsonBuilder* builder = json_builder_new();
 
@@ -404,7 +404,7 @@ static void add_event(Calendar* c, Event* event)
 	remote_auth_new_request(oc->auth, do_outlook_add_event, oc, event);
 }
 
-static void do_outlook_sync(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers);
+static void do_outlook_sync(OutlookCalendar* oc, gchar* err, CURL* curl, struct curl_slist* headers);
 
 static void outlook_sync(Calendar* c)
 {
@@ -634,8 +634,15 @@ static void on_sync_response(CURL* curl, CURLcode ret, void* user)
 	g_object_unref(parser);
 }
 
-static void do_outlook_sync(OutlookCalendar* oc, CURL* curl, struct curl_slist* headers)
+static void do_outlook_sync(OutlookCalendar* oc, gchar* err, CURL* curl, struct curl_slist* headers)
 {
+	if (err) {
+		_calendar_error(FOCAL_CALENDAR(oc), "%s", err);
+		g_signal_emit_by_name(oc, "sync-done", FALSE, 0);
+		g_free(err);
+		return;
+	}
+
 	headers = curl_slist_append(headers, "client-request-id: abcd1234");
 	headers = curl_slist_append(headers, "return-client-request-id: true");
 	headers = curl_slist_append(headers, "Prefer: outlook.body-content-type=\"text\"");

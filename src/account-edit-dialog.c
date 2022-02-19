@@ -31,7 +31,7 @@ struct _AccountEditDialog {
 };
 G_DEFINE_TYPE(AccountEditDialog, account_edit_dialog, GTK_TYPE_DIALOG);
 
-static void on_auth_success(AccountEditDialog* dialog)
+static void on_auth_success(AccountEditDialog* dialog, gchar* err)
 {
 	// probably the email address was updated by the authentication process
 	gtk_entry_buffer_set_text(gtk_entry_get_buffer(GTK_ENTRY(dialog->email)), dialog->config->email, -1);

@@ -338,7 +338,7 @@ static void focal_create_main_window(GApplication* app, FocalApp* fm)
 
 	GtkWidget* box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
-	fm->error_label = g_object_new(GTK_TYPE_LABEL, "use-markup", TRUE, 0);
+	fm->error_label = g_object_new(GTK_TYPE_LABEL, "use-markup", TRUE, "wrap", TRUE, 0);
 	fm->infoBar = g_object_new(GTK_TYPE_INFO_BAR, "message-type", GTK_MESSAGE_WARNING, "show-close-button", TRUE, 0);
 	g_signal_connect_swapped(fm->infoBar, "response", (GCallback) handle_info_bar_dismissed, fm);
 

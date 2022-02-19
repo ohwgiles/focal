@@ -273,7 +273,7 @@ static size_t caldav_put_response_get_etag(char* ptr, size_t size, size_t nmemb,
 	return size * nmemb;
 }
 
-static void do_caldav_put(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, Event* event)
+static void do_caldav_put(CaldavCalendar* rc, gchar* err, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	ModifyContext* ac = g_new0(ModifyContext, 1);
 	ac->cal = rc;
@@ -338,7 +338,7 @@ static void save_event(Calendar* c, Event* event)
 	remote_auth_new_request(rc->auth, do_caldav_put, rc, event);
 }
 
-static void do_delete_event(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, Event* event)
+static void do_delete_event(CaldavCalendar* rc, gchar* err, CURL* curl, struct curl_slist* headers, Event* event)
 {
 	ModifyContext* pc = g_new0(ModifyContext, 1);
 	pc->cal = rc;
@@ -533,7 +533,7 @@ static void sync_multiget_report_done(CURL* curl, CURLcode ret, void* user)
 	g_signal_emit_by_name(rc, "sync-done", TRUE, 0);
 }
 
-static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers, GSList* hrefs)
+static void do_multiget_events(CaldavCalendar* rc, gchar* err, CURL* curl, struct curl_slist* headers, GSList* hrefs)
 {
 	SyncContext* sc = g_new0(SyncContext, 1);
 	sc->cal = rc;
@@ -575,7 +575,7 @@ static void do_multiget_events(CaldavCalendar* rc, CURL* curl, struct curl_slist
 	async_curl_add_request(curl, headers, sync_multiget_report_done, sc);
 }
 
-static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers);
+static void do_caldav_sync(CaldavCalendar* rc, gchar* err, CURL* curl, struct curl_slist* headers);
 
 static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 {
@@ -664,7 +664,7 @@ static void sync_collection_report_done(CURL* curl, CURLcode ret, void* user)
 	remote_auth_new_request(rc->auth, do_multiget_events, rc, hrefs);
 }
 
-static void do_caldav_sync(CaldavCalendar* rc, CURL* curl, struct curl_slist* headers)
+static void do_caldav_sync(CaldavCalendar* rc, gchar* err, CURL* curl, struct curl_slist* headers)
 {
 	// Begin sync operation. According to RFC6578, the first step is to send
 	// a sync-collection REPORT to retrieve a list of hrefs that have been

@@ -131,6 +131,15 @@ static void on_request_access_token_complete(CURL* curl, CURLcode ret, void* use
 	RemoteAuthOAuth2* oa = (RemoteAuthOAuth2*) user;
 	long response_code;
 	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &response_code);
+
+	if (response_code == 400) {
+		// invoke original handler
+		(*oa->ctx->callback)(oa->ctx->user, g_strdup(oa->response_body->str), NULL, NULL, oa->ctx->arg);
+		g_free(oa->ctx);
+		oa->ctx = NULL;
+		return;
+	}
+
 	if (response_code != 200) {
 		g_critical("unhandled response code %ld, response %s\n", response_code, oa->response_body->str);
 		return;
@@ -270,7 +279,7 @@ static void on_access_token_lookup_complete(GObject* source, GAsyncResult* resul
 		hdrs = curl_slist_append(hdrs, auth_header);
 		g_free(auth_header);
 		// invoke original handler
-		(*ba->ctx->callback)(ba->ctx->user, curl, hdrs, ba->ctx->arg);
+		(*ba->ctx->callback)(ba->ctx->user, NULL, curl, hdrs, ba->ctx->arg);
 		secret_password_free(token);
 	}
 	g_free(ba->ctx);
