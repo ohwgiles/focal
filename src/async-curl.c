@@ -104,12 +104,7 @@ static gboolean on_timer_event(gpointer user_data)
 
 static int timer_callback(CURLM* multi, long timeout_ms, void* userp)
 {
-	if (timeout_ms == 0) {
-		on_timer_event(multi);
-	} else if (timeout_ms > 0) {
-		g_timeout_add(timeout_ms, on_timer_event, multi);
-	}
-
+	g_timeout_add(timeout_ms, on_timer_event, multi);
 	return 0;
 }
 
